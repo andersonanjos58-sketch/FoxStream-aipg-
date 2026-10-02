@@ -1,0 +1,6 @@
+{
+  "name": "FoxStream",
+  "description": "Aplicativo moderno de catálogo e gerenciamento IPTV nativo com suporte a M3U/M3U8, Xtream Codes/XC API e reprodução externa via VLC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

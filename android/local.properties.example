@@ -1,0 +1,10 @@
+# FoxStream Android - Configurações Locais
+# Copie este modelo ou adicione as propriedades ao seu arquivo local.properties
+
+# Caminho do SDK do Android (gerenciado pelo Android Studio):
+# sdk.dir=/seu/caminho/para/o/Android/Sdk
+
+# Chave de API do TMDB (The Movie Database):
+# Obtenha sua chave gratuita em https://www.themoviedb.org/settings/api
+# Insira sua chave v3 ou Token v4 abaixo:
+tmdb.api.key=SUA_CHAVE_TMDB_AQUI

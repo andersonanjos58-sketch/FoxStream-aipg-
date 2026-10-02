@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>FoxStream - Gerenciador & Catálogo IPTV</title>
+    <meta name="description" content="Aplicativo moderno de catálogo e gerenciamento IPTV nativo com suporte a M3U/M3U8, Xtream Codes/XC API e reprodução externa via VLC." />
+    <meta property="og:title" content="FoxStream - Gerenciador & Catálogo IPTV" />
+    <meta property="og:description" content="Aplicativo moderno de catálogo e gerenciamento IPTV nativo com suporte a M3U/M3U8, Xtream Codes/XC API e reprodução externa via VLC." />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#0d0e12" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        window.addEventListener('error', function(e) {
+          console.warn('FoxStream window error intercepted:', e.message || e.error);
+          if (e && typeof e.preventDefault === 'function') {
+            e.preventDefault();
+          }
+          return true;
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          console.warn('FoxStream unhandled rejection intercepted:', e.reason);
+          if (e && typeof e.preventDefault === 'function') {
+            e.preventDefault();
+          }
+        }, true);
+      })();
+    </script>
+  </head>
+  <body class="bg-[#090a0f] text-neutral-100 antialiased selection:bg-orange-500 selection:text-white overflow-x-hidden min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

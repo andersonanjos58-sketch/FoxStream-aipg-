@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Large dependencies and SDKs
+android-sdk/
+jdk-17/
+.gradle/
+android/app/build/
+android/.gradle/
+local.properties
+.idea/
