@@ -48,8 +48,10 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
     val history = mutableStateListOf<HistoryItem>()
     val continueWatching = mutableStateListOf<HistoryItem>()
     
-    // In-memory metadata cache for series details to avoid repeated network calls
+    // In-memory metadata cache and O(1) title index maps to avoid main-thread linear scans
     private val seriesMetadataCache = java.util.concurrent.ConcurrentHashMap<String, SeriesItem>()
+    private val movieCleanMap = java.util.concurrent.ConcurrentHashMap<String, MovieItem>()
+    private val seriesCleanMap = java.util.concurrent.ConcurrentHashMap<String, SeriesItem>()
 
     // Global search states
     var searchQuery by mutableStateOf("")
@@ -145,6 +147,29 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
                 seriesList.clear()
                 seriesList.addAll(pSeries)
 
+                // Asynchronously index titles for O(1) instant lookup
+                viewModelScope.launch(Dispatchers.IO) {
+                    val mMap = java.util.concurrent.ConcurrentHashMap<String, MovieItem>()
+                    pMovies.forEach { m ->
+                        val (cleaned, _) = SmartMatch.cleanTitle(m.name)
+                        if (cleaned.isNotBlank() && !mMap.containsKey(cleaned)) {
+                            mMap[cleaned] = m
+                        }
+                    }
+                    movieCleanMap.clear()
+                    movieCleanMap.putAll(mMap)
+
+                    val sMap = java.util.concurrent.ConcurrentHashMap<String, SeriesItem>()
+                    pSeries.forEach { s ->
+                        val (cleaned, _) = SmartMatch.cleanTitle(s.name)
+                        if (cleaned.isNotBlank() && !sMap.containsKey(cleaned)) {
+                            sMap[cleaned] = s
+                        }
+                    }
+                    seriesCleanMap.clear()
+                    seriesCleanMap.putAll(sMap)
+                }
+
                 // Phase 1: Render cached TMDb Home carousels if available, otherwise fetch from TMDb API
                 val cached = withContext(Dispatchers.IO) {
                     HomeCacheManager.load(getApplication(), db, playlistId)
@@ -187,11 +212,32 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun findLocalMovieStream(name: String, year: String?): MovieItem? {
+        if (name.isBlank()) return null
+        val (cleanedTmdb, _) = SmartMatch.cleanTitle(name)
+
+        // 1. O(1) Instant Title Map Lookup (< 0.1ms)
+        if (cleanedTmdb.isNotBlank()) {
+            movieCleanMap[cleanedTmdb]?.let { local ->
+                val res = SmartMatch.evaluateMatch(
+                    localRawName = local.name,
+                    localCategory = local.category,
+                    localRawYear = local.year,
+                    tmdbTitle = name,
+                    tmdbOriginalTitle = null,
+                    tmdbYear = year,
+                    tmdbGenres = null
+                )
+                if (res.isMatch) return local
+            }
+        }
+
+        // 2. Thread-safe snapshot copy to prevent ConcurrentModification and main thread freezes
+        val localList = movies.toList()
         var bestMovie: MovieItem? = null
         var bestScore = 64 // cut score of 65/100
 
-        for (m in movies) {
-            val res = com.foxstream.app.util.SmartMatch.evaluateMatch(
+        for (m in localList) {
+            val res = SmartMatch.evaluateMatch(
                 localRawName = m.name,
                 localCategory = m.category,
                 localRawYear = m.year,
@@ -203,18 +249,39 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             if (res.isMatch && res.score > bestScore) {
                 bestScore = res.score
                 bestMovie = m
-                if (bestScore >= 98) break
+                if (bestScore >= 95) break
             }
         }
         return bestMovie
     }
 
     fun findLocalSeries(name: String, year: String?): SeriesItem? {
+        if (name.isBlank()) return null
+        val (cleanedTmdb, _) = SmartMatch.cleanTitle(name)
+
+        // 1. O(1) Instant Title Map Lookup (< 0.1ms)
+        if (cleanedTmdb.isNotBlank()) {
+            seriesCleanMap[cleanedTmdb]?.let { local ->
+                val res = SmartMatch.evaluateMatch(
+                    localRawName = local.name,
+                    localCategory = local.category,
+                    localRawYear = local.year,
+                    tmdbTitle = name,
+                    tmdbOriginalTitle = null,
+                    tmdbYear = year,
+                    tmdbGenres = null
+                )
+                if (res.isMatch) return local
+            }
+        }
+
+        // 2. Thread-safe snapshot copy
+        val localList = seriesList.toList()
         var bestSeries: SeriesItem? = null
         var bestScore = 64
 
-        for (s in seriesList) {
-            val res = com.foxstream.app.util.SmartMatch.evaluateMatch(
+        for (s in localList) {
+            val res = SmartMatch.evaluateMatch(
                 localRawName = s.name,
                 localCategory = s.category,
                 localRawYear = s.year,
@@ -226,7 +293,7 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             if (res.isMatch && res.score > bestScore) {
                 bestScore = res.score
                 bestSeries = s
-                if (bestScore >= 98) break
+                if (bestScore >= 95) break
             }
         }
         return bestSeries

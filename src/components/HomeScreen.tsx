@@ -110,26 +110,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return combined.slice(0, 20);
   });
 
-  // Dynamic category pills extracted directly from playlist items (0ms)
-  const allCategories = React.useMemo(() => {
-    const cats: string[] = [];
+  // Dynamic top categories extracted directly from playlist items for up to 12 carousels
+  const topPlaylistCategories = React.useMemo(() => {
+    const frequency: Record<string, number> = {};
     movies.forEach(m => {
       const c = m.category?.trim();
-      if (c && c.toLowerCase() !== 'filmes' && c.toLowerCase() !== 'geral') cats.push(c);
+      if (c && c.toLowerCase() !== 'filmes' && c.toLowerCase() !== 'geral' && c.toLowerCase() !== 'todos') {
+        frequency[c] = (frequency[c] || 0) + 1;
+      }
     });
     series.forEach(s => {
       const c = s.category?.trim();
-      if (c && c.toLowerCase() !== 'séries' && c.toLowerCase() !== 'geral') cats.push(c);
+      if (c && c.toLowerCase() !== 'séries' && c.toLowerCase() !== 'geral' && c.toLowerCase() !== 'todos') {
+        frequency[c] = (frequency[c] || 0) + 1;
+      }
     });
     channels.forEach(ch => {
       const c = ch.category?.trim();
-      if (c && c.toLowerCase() !== 'canais' && c.toLowerCase() !== 'geral') cats.push(c);
+      if (c && c.toLowerCase() !== 'canais' && c.toLowerCase() !== 'tv ao vivo' && c.toLowerCase() !== 'geral' && c.toLowerCase() !== 'todos') {
+        frequency[c] = (frequency[c] || 0) + 1;
+      }
     });
-
-    const frequency: Record<string, number> = {};
-    cats.forEach(c => { frequency[c] = (frequency[c] || 0) + 1; });
-    const sorted = Object.keys(frequency).sort((a, b) => frequency[b] - frequency[a]);
-    return ['Todos', ...sorted];
+    return Object.keys(frequency).sort((a, b) => frequency[b] - frequency[a]).slice(0, 12);
   }, [movies, series, channels]);
 
   // Featured List (carrossel de destaques)
@@ -372,36 +374,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   return (
     <div className="space-y-6 pb-24 overflow-x-hidden animate-in fade-in duration-300">
-      {/* Dynamic Category Pills Row (from M3U playlist) */}
-      {allCategories.length > 1 && (
-        <div className="px-4 max-w-7xl mx-auto pt-2">
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-            {allCategories.map(cat => {
-              const isSelected = selectedCategory === cat;
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setSelectedCategory(selectedCategory === cat && cat !== 'Todos' ? 'Todos' : cat)}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-orange-500 text-white shadow-md shadow-orange-950/40 font-bold'
-                      : 'bg-neutral-900/90 text-neutral-300 hover:text-white hover:bg-neutral-800 border border-neutral-800'
-                  }`}
-                >
-                  {cat !== 'Todos' && (
-                    <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-orange-500'}`} />
-                  )}
-                  <span>{cat}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Featured Header Banner Carousel */}
-      {currentFeatured && selectedCategory === 'Todos' && (
+      {currentFeatured && (
         <section 
           onMouseEnter={() => setIsPaused(true)}
           onMouseLeave={() => setIsPaused(false)}
@@ -664,6 +638,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               >
                 {history.map((item) => {
                   const isSelected = selectedHistoryId === item.id;
+                  const seriesMatch = item.type === 'series'
+                    ? series.find(s => 
+                        s.name.toLowerCase() === (item.seriesName || item.title.split(' - ')[0]).trim().toLowerCase() ||
+                        item.title.toLowerCase().startsWith(s.name.toLowerCase()) ||
+                        s.seasons?.some(se => se.episodes?.some(ep => ep.streamUrl === item.streamUrl))
+                      )
+                    : null;
+                  const itemPoster = item.type === 'series'
+                    ? (seriesMatch?.posterUrl || item.posterUrl)
+                    : (item.posterUrl || (item.type === 'movie' ? movies.find(m => m.streamUrl === item.streamUrl)?.posterUrl : channels.find(ch => ch.streamUrl === item.streamUrl)?.logoUrl));
+
                   return (
                     <div
                       key={item.id}
@@ -678,9 +663,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 shrink-0 group-hover:scale-105 transition-transform overflow-hidden">
-                          {item.posterUrl ? (
+                          {itemPoster ? (
                             <img 
-                              src={item.posterUrl} 
+                              src={itemPoster} 
                               alt={item.title} 
                               className="w-full h-full object-cover rounded-xl"
                               onError={(e) => {
@@ -1244,6 +1229,150 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
         </section>
       )}
+
+      {/* SECTION 10: ATÉ 12 CARROSSÉIS DE CATEGORIAS DA LISTA IPTV */}
+      {topPlaylistCategories.map((catName) => {
+        const catMovies = movies.filter(m => m.category?.toLowerCase() === catName.toLowerCase());
+        const catSeries = series.filter(s => s.category?.toLowerCase() === catName.toLowerCase());
+        const catChannels = channels.filter(ch => ch.category?.toLowerCase() === catName.toLowerCase());
+
+        if (catMovies.length > 0) {
+          return (
+            <section key={`top_cat_${catName}`} className="px-4 max-w-7xl mx-auto space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Film className="w-4 h-4 text-orange-400" />
+                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                    {catName}
+                  </h2>
+                  <span className="text-xs text-neutral-500 font-medium">({catMovies.length})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('movies')}
+                  className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                >
+                  Ver todos <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                {catMovies.map(movie => (
+                  <div
+                    key={`top_cat_m_${movie.id}`}
+                    onClick={() => onSelectMovie(movie)}
+                    className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-amber-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                  >
+                    <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                      {movie.posterUrl ? (
+                        <img src={movie.posterUrl} alt={movie.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Film className="w-8 h-8" /></div>
+                      )}
+                      {movie.year && (
+                        <span className="absolute top-2 left-2 bg-black/70 backdrop-blur-md text-white text-[9px] font-bold px-1.5 py-0.5 rounded">{movie.year}</span>
+                      )}
+                    </div>
+                    <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{movie.name}</h4>
+                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{movie.category}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (catSeries.length > 0) {
+          return (
+            <section key={`top_cat_${catName}`} className="px-4 max-w-7xl mx-auto space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clapperboard className="w-4 h-4 text-rose-400" />
+                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                    {catName}
+                  </h2>
+                  <span className="text-xs text-neutral-500 font-medium">({catSeries.length})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('series')}
+                  className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                >
+                  Ver todos <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                {catSeries.map(s => (
+                  <div
+                    key={`top_cat_s_${s.id}`}
+                    onClick={() => onSelectSeries(s)}
+                    className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-rose-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                  >
+                    <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                      {s.posterUrl ? (
+                        <img src={s.posterUrl} alt={s.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Clapperboard className="w-8 h-8" /></div>
+                      )}
+                      <span className="absolute bottom-2 right-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                        {s.seasons?.length || 1} Temp
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{s.name}</h4>
+                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{s.category}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (catChannels.length > 0) {
+          return (
+            <section key={`top_cat_${catName}`} className="px-4 max-w-7xl mx-auto space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Tv className="w-4 h-4 text-orange-500" />
+                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                    {catName}
+                  </h2>
+                  <span className="text-xs text-neutral-500 font-medium">({catChannels.length})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('live')}
+                  className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                >
+                  Ver todos <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                {catChannels.map(ch => (
+                  <div
+                    key={`top_cat_ch_${ch.id}`}
+                    onClick={() => onPlayChannel(ch)}
+                    className="group relative flex-shrink-0 w-36 sm:w-44 p-3 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-orange-500/60 cursor-pointer transition-all active:scale-95 shadow-md"
+                  >
+                    <div className="w-full h-20 rounded-xl bg-neutral-900/90 flex items-center justify-center p-2 mb-2 relative overflow-hidden border border-neutral-800">
+                      {ch.logoUrl ? (
+                        <img src={ch.logoUrl} alt={ch.name} referrerPolicy="no-referrer" className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200" />
+                      ) : (
+                        <Tv className="w-8 h-8 text-neutral-600" />
+                      )}
+                    </div>
+                    <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{ch.name}</h4>
+                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{ch.category}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        return null;
+      })}
         </>
       )}
     </div>

@@ -534,38 +534,33 @@ fun HomeScreen(
         return
     }
 
-    // Extract all categories directly from local playlist items (0ms, independent of API)
-    val allCategories = remember(movies, seriesList, channels) {
-        val cats = mutableListOf<String>()
+    // Top populated categories directly from playlist items for up to 12 dedicated category carousels
+    val topPlaylistCategories = remember(movies, seriesList, channels) {
+        val catsWithCounts = mutableMapOf<String, Int>()
+
         movies.forEach { m ->
             val c = m.category.trim()
-            if (c.isNotBlank() && !c.equals("Filmes", ignoreCase = true) && !c.equals("Geral", ignoreCase = true)) {
-                cats.add(c)
+            if (c.isNotBlank() && !c.equals("Filmes", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
+                catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
             }
         }
         seriesList.forEach { s ->
             val c = s.category.trim()
-            if (c.isNotBlank() && !c.equals("Séries", ignoreCase = true) && !c.equals("Geral", ignoreCase = true)) {
-                cats.add(c)
+            if (c.isNotBlank() && !c.equals("Séries", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
+                catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
             }
         }
         channels.forEach { ch ->
             val c = ch.category.trim()
-            if (c.isNotBlank() && !c.equals("Canais", ignoreCase = true) && !c.equals("Geral", ignoreCase = true)) {
-                cats.add(c)
+            if (c.isNotBlank() && !c.equals("Canais", ignoreCase = true) && !c.equals("TV ao Vivo", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
+                catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
             }
         }
 
-        val grouped = cats.groupingBy { it }.eachCount()
-        val sorted = grouped.entries.sortedByDescending { it.value }.map { it.key }
-        listOf("Todos") + sorted
-    }
-
-    var selectedCategory by remember { mutableStateOf("Todos") }
-
-    // Top populated categories for dedicated dynamic carousels
-    val topPlaylistCategories = remember(allCategories) {
-        allCategories.filter { it != "Todos" }.take(4)
+        catsWithCounts.entries
+            .sortedByDescending { it.value }
+            .map { it.key }
+            .take(12)
     }
 
     // Dynamic Hero Banner items: prioritizes TMDB matched content from user's active playlist
@@ -646,110 +641,7 @@ fun HomeScreen(
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. LINHA DE CATEGORIAS DA LISTA M3U (Pills Horizontais no topo)
-        if (allCategories.size > 1) {
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(allCategories) { cat ->
-                        val isSelected = (cat == selectedCategory) || (cat == "Todos" && selectedCategory == "Todos")
-                        Surface(
-                            onClick = {
-                                selectedCategory = if (selectedCategory == cat && cat != "Todos") "Todos" else cat
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (isSelected) OrangePrimary else Color(0xFF1E222D),
-                            border = BorderStroke(
-                                width = 1.dp,
-                                color = if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.12f)
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                if (cat != "Todos") {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isSelected) Color.White else OrangePrimary)
-                                    )
-                                }
-                                Text(
-                                    text = cat,
-                                    color = if (isSelected) Color.White else Color(0xFFD0D6E0),
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
-        // Se uma categoria específica for selecionada no topo, exibe a exibição filtrada
-        if (selectedCategory != "Todos") {
-            val catMovies = movies.filter { it.category.equals(selectedCategory, ignoreCase = true) }
-            val catSeries = seriesList.filter { it.category.equals(selectedCategory, ignoreCase = true) }
-            val catChannels = channels.filter { it.category.equals(selectedCategory, ignoreCase = true) }
-
-            if (catMovies.isNotEmpty()) {
-                item {
-                    SectionHeaderWithAction(
-                        title = "$selectedCategory (Filmes)",
-                        actionText = "Ver todos",
-                        onAction = { onNavigate(AppNavTab.MOVIES) }
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    MoviesHorizontalCarousel(
-                        movies = catMovies,
-                        favorites = favorites,
-                        onPlay = onPlay,
-                        onOpenMovie = onOpenMovie,
-                        onToggleFavorite = onToggleFavoriteMovie
-                    )
-                }
-            }
-
-            if (catSeries.isNotEmpty()) {
-                item {
-                    SectionHeaderWithAction(
-                        title = "$selectedCategory (Séries)",
-                        actionText = "Ver todos",
-                        onAction = { onNavigate(AppNavTab.SERIES) }
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    SeriesHorizontalCarousel(
-                        seriesList = catSeries,
-                        onOpenSeries = onOpenSeries
-                    )
-                }
-            }
-
-            if (catChannels.isNotEmpty()) {
-                item {
-                    SectionHeaderWithAction(
-                        title = "$selectedCategory (Canais)",
-                        actionText = "Ver todos",
-                        onAction = { onNavigate(AppNavTab.LIVE) }
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LiveChannelsHorizontalCarousel(
-                        channels = catChannels,
-                        favorites = favorites,
-                        onPlay = onPlay,
-                        onToggleFavorite = onToggleFavoriteChannel
-                    )
-                }
-            }
-        } else {
-            // MODO PADRÃO HOME: Todos os carrosséis completos
 
             // 2. Destaques (Hero Banner Carousel)
             item {
@@ -799,15 +691,23 @@ fun HomeScreen(
                     ) {
                         items(history, key = { it.id }) { item ->
                             val isSelected = selectedContinueWatchingId == item.id
+                            val seriesPoster = if (item.type == ContentType.SERIES) {
+                                val sName = item.seriesName ?: item.title.substringBefore(" - ").trim()
+                                val matchedByEp = seriesList.find { s -> s.seasons.any { season -> season.episodes.any { ep -> ep.streamUrl == item.streamUrl } } }
+                                val matchedByName = seriesList.find { s ->
+                                    s.name.equals(sName, ignoreCase = true) ||
+                                    item.title.startsWith(s.name, ignoreCase = true) ||
+                                    (sName.length > 2 && s.name.contains(sName, ignoreCase = true))
+                                }
+                                matchedByEp?.posterUrl ?: matchedByName?.posterUrl
+                            } else null
+
                             val fallbackPoster = when (item.type) {
                                 ContentType.MOVIE -> movies.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.posterUrl
-                                ContentType.SERIES -> {
-                                    val sName = item.seriesName ?: item.title.substringBefore(" - ").trim()
-                                    seriesList.find { it.name.equals(sName, ignoreCase = true) }?.posterUrl
-                                }
+                                ContentType.SERIES -> seriesPoster
                                 ContentType.LIVE -> channels.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.logoUrl
                             }
-                            val posterToUse = item.posterUrl ?: fallbackPoster
+                            val posterToUse = if (item.type == ContentType.SERIES) (seriesPoster ?: item.posterUrl) else (item.posterUrl ?: fallbackPoster)
                             val placeholderIcon = when (item.type) {
                                 ContentType.LIVE -> Icons.Default.Tv
                                 ContentType.MOVIE -> Icons.Default.Movie
@@ -1109,10 +1009,11 @@ fun HomeScreen(
                 }
             }
 
-            // 11. Carrosséis Dinâmicos por Categorias Populares da Lista
+            // 10. Até 12 Carrosséis Dinâmicos por Categorias Pré-definidas na Lista IPTV
             topPlaylistCategories.forEach { catName ->
                 val catMovies = movies.filter { it.category.equals(catName, ignoreCase = true) }
                 val catSeries = seriesList.filter { it.category.equals(catName, ignoreCase = true) }
+                val catChannels = channels.filter { it.category.equals(catName, ignoreCase = true) }
 
                 if (catMovies.isNotEmpty()) {
                     item {
@@ -1143,27 +1044,23 @@ fun HomeScreen(
                             onOpenSeries = onOpenSeries
                         )
                     }
+                } else if (catChannels.isNotEmpty()) {
+                    item {
+                        SectionHeaderWithAction(
+                            title = catName,
+                            actionText = "Ver todos",
+                            onAction = { onNavigate(AppNavTab.LIVE) }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LiveChannelsHorizontalCarousel(
+                            channels = catChannels,
+                            favorites = favorites,
+                            onPlay = onPlay,
+                            onToggleFavorite = onToggleFavoriteChannel
+                        )
+                    }
                 }
             }
-
-            // 12. TV ao Vivo
-            if (channels.isNotEmpty()) {
-                item {
-                    SectionHeaderWithAction(
-                        title = "TV ao Vivo",
-                        actionText = "Ver todos",
-                        onAction = { onNavigate(AppNavTab.LIVE) }
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LiveChannelsHorizontalCarousel(
-                        channels = channels,
-                        favorites = favorites,
-                        onPlay = onPlay,
-                        onToggleFavorite = onToggleFavoriteChannel
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -1603,7 +1500,8 @@ fun MoviesScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var debouncedSearchQuery by remember { mutableStateOf("") }
-    var filtered by remember { mutableStateOf<List<MovieItem>>(emptyList()) }
+    var selectedCategoryForGrid by remember { mutableStateOf<String?>(null) }
+    var showCategoriesDropdown by remember { mutableStateOf(false) }
 
     // Debounce the search input by 300ms to avoid constant filtering during active typing
     LaunchedEffect(searchQuery) {
@@ -1611,28 +1509,32 @@ fun MoviesScreen(
         debouncedSearchQuery = searchQuery
     }
 
-    val categories = remember(movies) {
-        listOf("Todos") + movies.map { it.category.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
-    }
-    var selectedCategory by remember { mutableStateOf("Todos") }
-
-    // Perform the filtering on Dispatchers.Default (Background Thread) to never lock UI
-    LaunchedEffect(debouncedSearchQuery, selectedCategory, movies) {
-        val result = withContext(Dispatchers.Default) {
-            var list = if (selectedCategory == "Todos") movies
-                       else movies.filter { it.category.equals(selectedCategory, ignoreCase = true) }
-            val tokens = SearchUtils.extractTokens(debouncedSearchQuery)
-            if (tokens.isNotEmpty()) {
-                list = list.filter {
-                    SearchUtils.matchesAnyField(tokens, it.name, it.category)
-                }
-            }
-            list
+    // Map of categories preserving list order
+    val categoriesMap = remember(movies) {
+        val map = linkedMapOf<String, MutableList<MovieItem>>()
+        movies.forEach { m ->
+            val cat = m.category.trim().ifBlank { "Geral" }
+            map.getOrPut(cat) { mutableListOf() }.add(m)
         }
-        filtered = result
+        map
+    }
+
+    val allCategoriesList = remember(categoriesMap) {
+        categoriesMap.keys.toList()
+    }
+
+    // Global Search across entire movie catalog
+    val searchResults = remember(debouncedSearchQuery, movies) {
+        if (debouncedSearchQuery.isBlank()) emptyList()
+        else {
+            val tokens = SearchUtils.extractTokens(debouncedSearchQuery)
+            movies.filter { SearchUtils.matchesAnyField(tokens, it.name, it.category, it.year ?: "") }
+        }
+    }
+
+    // Handle Android back button when viewing category grid
+    BackHandler(enabled = selectedCategoryForGrid != null && searchQuery.isBlank()) {
+        selectedCategoryForGrid = null
     }
 
     Column(
@@ -1640,10 +1542,11 @@ fun MoviesScreen(
             .fillMaxSize()
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
+        // Top Search Bar (Searches all movies)
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar filme...") },
+            placeholder = { Text("Buscar em todos os filmes...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
@@ -1663,26 +1566,181 @@ fun MoviesScreen(
             )
         )
 
-        CategoryFilterRow(
-            categories = categories,
-            selectedCategory = selectedCategory,
-            onSelectCategory = { selectedCategory = it },
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
+        Spacer(modifier = Modifier.height(8.dp))
 
-        Spacer(modifier = Modifier.height(4.dp))
+        // Categories Cascading Dropdown Bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box {
+                Button(
+                    onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FilterList,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-        if (filtered.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                DropdownMenu(
+                    expanded = showCategoriesDropdown,
+                    onDismissRequest = { showCategoriesDropdown = false },
+                    modifier = Modifier
+                        .background(Color(0xFF161924))
+                        .widthIn(min = 220.dp, max = 290.dp)
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Todas as Categorias (Carrosséis)",
+                                fontSize = 12.5.sp,
+                                fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                            )
+                        },
+                        onClick = {
+                            selectedCategoryForGrid = null
+                            showCategoriesDropdown = false
+                        }
+                    )
+                    Divider(color = Color.White.copy(alpha = 0.12f))
+                    allCategoriesList.forEach { cat ->
+                        val count = categoriesMap[cat]?.size ?: 0
+                        val isSelected = selectedCategoryForGrid == cat
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = cat,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF23283B)
+                                    ) {
+                                        Text(
+                                            text = "$count",
+                                            fontSize = 10.sp,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                selectedCategoryForGrid = cat
+                                showCategoriesDropdown = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (selectedCategoryForGrid != null && searchQuery.isBlank()) {
+                TextButton(onClick = { selectedCategoryForGrid = null }) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = null,
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Ver carrosséis",
+                        color = OrangePrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // VIEW 1: GLOBAL SEARCH RESULTS (Searches across all movies)
+        if (searchQuery.isNotBlank()) {
+            if (searchResults.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Nenhum filme encontrado para \"$searchQuery\".",
+                        color = Color.Gray
+                    )
+                }
+            } else {
+                Text(
+                    text = "Resultados da busca (${searchResults.size} filmes encontrados):",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(searchResults, key = { it.id }) { movie ->
+                        val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
+                        MovieGridCard(
+                            movie = movie,
+                            isFavorite = isFav,
+                            onPlay = onPlay,
+                            onOpenMovie = onOpenMovie,
+                            onToggleFavorite = onToggleFavorite
+                        )
+                    }
+                }
+            }
+        }
+        // VIEW 2: CATEGORY DETAIL ("VER TUDO" GRID)
+        else if (selectedCategoryForGrid != null) {
+            val catMovies = categoriesMap[selectedCategoryForGrid] ?: emptyList()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = if (searchQuery.isNotBlank() || selectedCategory != "Todos") "Nenhum filme encontrado." else "Nenhum filme disponível.",
-                    color = Color.Gray
+                    text = "$selectedCategoryForGrid (${catMovies.size} filmes)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
             }
-        } else {
+            Spacer(modifier = Modifier.height(6.dp))
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
@@ -1690,7 +1748,7 @@ fun MoviesScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(filtered, key = { it.id }) { movie ->
+                items(catMovies, key = { it.id }) { movie ->
                     val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
                     MovieGridCard(
                         movie = movie,
@@ -1699,6 +1757,44 @@ fun MoviesScreen(
                         onOpenMovie = onOpenMovie,
                         onToggleFavorite = onToggleFavorite
                     )
+                }
+            }
+        }
+        // VIEW 3: CAROUSEL PER CATEGORY (MAIN VIEW)
+        else {
+            if (movies.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Nenhum filme disponível na lista.",
+                        color = Color.Gray
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    categoriesMap.forEach { (catName, catMovies) ->
+                        item(key = "cat_$catName") {
+                            SectionHeaderWithAction(
+                                title = catName,
+                                actionText = "Ver tudo",
+                                onAction = { selectedCategoryForGrid = catName }
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            MoviesHorizontalCarousel(
+                                movies = catMovies,
+                                favorites = favorites,
+                                onPlay = onPlay,
+                                onOpenMovie = onOpenMovie,
+                                onToggleFavorite = onToggleFavorite
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2836,7 +2932,8 @@ fun SeriesScreen(
     var selectedSeries by remember { mutableStateOf<SeriesItem?>(initialSeries) }
     var searchQuery by remember { mutableStateOf("") }
     var debouncedSearchQuery by remember { mutableStateOf("") }
-    var filtered by remember { mutableStateOf<List<SeriesItem>>(emptyList()) }
+    var selectedCategoryForGrid by remember { mutableStateOf<String?>(null) }
+    var showCategoriesDropdown by remember { mutableStateOf(false) }
 
     // Debounce the search input by 300ms to avoid constant filtering during active typing
     LaunchedEffect(searchQuery) {
@@ -2867,28 +2964,39 @@ fun SeriesScreen(
         return
     }
 
-    val categories = remember(seriesList) {
-        listOf("Todos") + seriesList.map { it.category.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .sorted()
-    }
-    var selectedCategory by remember { mutableStateOf("Todos") }
-
-    // Perform the filtering on Dispatchers.Default (Background Thread) to never lock UI
-    LaunchedEffect(debouncedSearchQuery, selectedCategory, seriesList) {
-        val result = withContext(Dispatchers.Default) {
-            var list = if (selectedCategory == "Todos") seriesList
-                       else seriesList.filter { it.category.equals(selectedCategory, ignoreCase = true) }
-            val tokens = SearchUtils.extractTokens(debouncedSearchQuery)
-            if (tokens.isNotEmpty()) {
-                list = list.filter {
-                    SearchUtils.matchesAnyField(tokens, it.name, it.category)
-                }
-            }
-            list
+    // Map of categories preserving list order
+    val categoriesMap = remember(seriesList) {
+        val map = linkedMapOf<String, MutableList<SeriesItem>>()
+        seriesList.forEach { s ->
+            val cat = s.category.trim().ifBlank { "Séries" }
+            map.getOrPut(cat) { mutableListOf() }.add(s)
         }
-        filtered = result
+        map
+    }
+
+    val allCategoriesList = remember(categoriesMap) {
+        categoriesMap.keys.toList()
+    }
+
+    // Global Search across entire series catalog
+    val searchResults = remember(debouncedSearchQuery, seriesList) {
+        if (debouncedSearchQuery.isBlank()) emptyList()
+        else {
+            val tokens = SearchUtils.extractTokens(debouncedSearchQuery)
+            seriesList.filter { SearchUtils.matchesAnyField(tokens, it.name, it.category) }
+        }
+    }
+
+    // Handle Android back button when viewing category grid
+    BackHandler(enabled = selectedCategoryForGrid != null && searchQuery.isBlank()) {
+        selectedCategoryForGrid = null
+    }
+
+    val onOpenSeriesItem: (SeriesItem) -> Unit = { s ->
+        selectedSeries = s
+        onLoadDetails(s) { loadedSeasons ->
+            selectedSeries = s.copy(seasons = loadedSeasons)
+        }
     }
 
     Column(
@@ -2896,10 +3004,11 @@ fun SeriesScreen(
             .fillMaxSize()
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
+        // Top Search Bar (Searches across all series)
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar série...") },
+            placeholder = { Text("Buscar em todas as séries...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
@@ -2919,26 +3028,177 @@ fun SeriesScreen(
             )
         )
 
-        CategoryFilterRow(
-            categories = categories,
-            selectedCategory = selectedCategory,
-            onSelectCategory = { selectedCategory = it },
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
+        Spacer(modifier = Modifier.height(8.dp))
 
-        Spacer(modifier = Modifier.height(4.dp))
+        // Categories Cascading Dropdown Bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box {
+                Button(
+                    onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FilterList,
+                        modifier = Modifier.size(16.dp),
+                        contentDescription = null
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-        if (filtered.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                DropdownMenu(
+                    expanded = showCategoriesDropdown,
+                    onDismissRequest = { showCategoriesDropdown = false },
+                    modifier = Modifier
+                        .background(Color(0xFF161924))
+                        .widthIn(min = 220.dp, max = 290.dp)
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Todas as Categorias (Carrosséis)",
+                                fontSize = 12.5.sp,
+                                fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                            )
+                        },
+                        onClick = {
+                            selectedCategoryForGrid = null
+                            showCategoriesDropdown = false
+                        }
+                    )
+                    Divider(color = Color.White.copy(alpha = 0.12f))
+                    allCategoriesList.forEach { cat ->
+                        val count = categoriesMap[cat]?.size ?: 0
+                        val isSelected = selectedCategoryForGrid == cat
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = cat,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF23283B)
+                                    ) {
+                                        Text(
+                                            text = "$count",
+                                            fontSize = 10.sp,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                selectedCategoryForGrid = cat
+                                showCategoriesDropdown = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (selectedCategoryForGrid != null && searchQuery.isBlank()) {
+                TextButton(onClick = { selectedCategoryForGrid = null }) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = null,
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Ver carrosséis",
+                        color = OrangePrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // VIEW 1: GLOBAL SEARCH RESULTS (Searches across all series)
+        if (searchQuery.isNotBlank()) {
+            if (searchResults.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Nenhuma série encontrada para \"$searchQuery\".",
+                        color = Color.Gray
+                    )
+                }
+            } else {
+                Text(
+                    text = "Resultados da busca (${searchResults.size} séries encontradas):",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(searchResults, key = { it.id }) { s ->
+                        SeriesGridCard(
+                            series = s,
+                            onSelect = { onOpenSeriesItem(s) }
+                        )
+                    }
+                }
+            }
+        }
+        // VIEW 2: CATEGORY DETAIL ("VER TUDO" GRID)
+        else if (selectedCategoryForGrid != null) {
+            val catSeries = categoriesMap[selectedCategoryForGrid] ?: emptyList()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = if (searchQuery.isNotBlank() || selectedCategory != "Todos") "Nenhuma série encontrada." else "Nenhuma série disponível.",
-                    color = Color.Gray
+                    text = "$selectedCategoryForGrid (${catSeries.size} séries)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
             }
-        } else {
+            Spacer(modifier = Modifier.height(6.dp))
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
@@ -2946,16 +3206,46 @@ fun SeriesScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(filtered, key = { it.id }) { s ->
+                items(catSeries, key = { it.id }) { s ->
                     SeriesGridCard(
                         series = s,
-                        onSelect = {
-                            selectedSeries = s
-                            onLoadDetails(s) { loadedSeasons ->
-                                selectedSeries = s.copy(seasons = loadedSeasons)
-                            }
-                        }
+                        onSelect = { onOpenSeriesItem(s) }
                     )
+                }
+            }
+        }
+        // VIEW 3: CAROUSEL PER CATEGORY (MAIN VIEW)
+        else {
+            if (seriesList.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Nenhuma série disponível na lista.",
+                        color = Color.Gray
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    categoriesMap.forEach { (catName, catSeries) ->
+                        item(key = "cat_$catName") {
+                            SectionHeaderWithAction(
+                                title = catName,
+                                actionText = "Ver tudo",
+                                onAction = { selectedCategoryForGrid = catName }
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            SeriesHorizontalCarousel(
+                                seriesList = catSeries,
+                                onOpenSeries = { onOpenSeriesItem(it) }
+                            )
+                        }
+                    }
                 }
             }
         }

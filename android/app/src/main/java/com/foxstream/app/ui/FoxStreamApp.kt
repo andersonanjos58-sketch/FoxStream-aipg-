@@ -30,6 +30,10 @@ import com.foxstream.app.data.model.*
 import com.foxstream.app.ui.navigation.NavDestinations
 import com.foxstream.app.ui.screens.*
 import com.foxstream.app.ui.viewmodel.FoxStreamViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class AppNavTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     HOME("Início", Icons.Default.Home),
@@ -57,6 +61,7 @@ fun FoxStreamApp(
     viewModel: FoxStreamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var currentTab by remember { mutableStateOf(AppNavTab.HOME) }
     var showAddPlaylistDialog by remember { mutableStateOf(false) }
     var showSearchScreen by remember { mutableStateOf(false) }
@@ -78,7 +83,21 @@ fun FoxStreamApp(
         val existingHist = viewModel.history.find { it.streamUrl == streamUrl }
         val savedPos = if (existingHist?.isWatched == true) 0L else (existingHist?.playbackPosition ?: 0L)
         activePlayingMedia = PlayingMedia(streamUrl, title, type, savedPos, sItem, epItem)
-        viewModel.addPlaybackToHistory(streamUrl, title, type)
+
+        val seriesPoster = sItem?.posterUrl 
+            ?: (if (type == ContentType.SERIES) seriesList.find { s -> s.seasons.any { se -> se.episodes.any { ep -> ep.streamUrl == streamUrl } } }?.posterUrl else null)
+            ?: (if (type == ContentType.MOVIE) movies.find { m -> m.streamUrl == streamUrl }?.posterUrl else null)
+
+        val seriesCat = sItem?.category
+            ?: (if (type == ContentType.SERIES) seriesList.find { s -> s.seasons.any { se -> se.episodes.any { ep -> ep.streamUrl == streamUrl } } }?.category else null)
+
+        viewModel.addPlaybackToHistory(
+            streamUrl = streamUrl,
+            title = title,
+            type = type,
+            posterUrl = seriesPoster,
+            category = seriesCat
+        )
     }
 
     val onPlayStream: (String, String, ContentType) -> Unit = { streamUrl, title, type ->
@@ -511,35 +530,36 @@ fun FoxStreamApp(
                 onBack = { selectedMovieForDetails = null },
                 onToggleFavorite = { viewModel.toggleFavoriteMovie(it) },
                 onPlay = { streamUrl, title, type, _ ->
-                    val finalUrl = if (streamUrl.isBlank()) {
-                        val matched = viewModel.findLocalMovieStream(movie.name, movie.year)
-                        if (matched != null) {
-                            matched.streamUrl
-                        } else {
-                            android.widget.Toast.makeText(context, "Conteúdo não disponível no seu servidor IPTV", android.widget.Toast.LENGTH_SHORT).show()
-                            ""
-                        }
+                    if (streamUrl.isNotBlank()) {
+                        playMedia(streamUrl, title, type, null, null)
                     } else {
-                        streamUrl
-                    }
-                    if (finalUrl.isNotBlank()) {
-                        playMedia(finalUrl, title, type, null, null)
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val matched = viewModel.findLocalMovieStream(movie.name, movie.year)
+                            withContext(Dispatchers.Main) {
+                                if (matched != null && matched.streamUrl.isNotBlank()) {
+                                    playMedia(matched.streamUrl, title, type, null, null)
+                                } else {
+                                    android.widget.Toast.makeText(context, "Conteúdo não disponível no seu servidor IPTV", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
                     }
                 },
                 onNavigateToPlayer = { route ->
-                    val finalRoute = if (movie.streamUrl.isBlank()) {
-                        val matched = viewModel.findLocalMovieStream(movie.name, movie.year)
-                        if (matched != null) {
-                            NavDestinations.buildPlayerRoute(matched.streamUrl)
-                        } else {
-                            android.widget.Toast.makeText(context, "Conteúdo não disponível no seu servidor IPTV", android.widget.Toast.LENGTH_SHORT).show()
-                            ""
-                        }
+                    val rawUrl = NavDestinations.parseStreamUrl(route.removePrefix("player_screen/"))
+                    if (rawUrl.isNotBlank()) {
+                        navigateToRoute(route)
                     } else {
-                        route
-                    }
-                    if (finalRoute.isNotBlank()) {
-                        navigateToRoute(finalRoute)
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val matched = viewModel.findLocalMovieStream(movie.name, movie.year)
+                            withContext(Dispatchers.Main) {
+                                if (matched != null && matched.streamUrl.isNotBlank()) {
+                                    navigateToRoute(NavDestinations.buildPlayerRoute(matched.streamUrl))
+                                } else {
+                                    android.widget.Toast.makeText(context, "Conteúdo não disponível no seu servidor IPTV", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
                     }
                 },
                 onLoadDetails = { m, callback ->
