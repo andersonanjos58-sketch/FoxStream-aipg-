@@ -21,6 +21,7 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [tmdbData, setTmdbData] = useState<TmdbData | null>(null);
   const [isLoadingTmdb, setIsLoadingTmdb] = useState(true);
+  const [isFindingStream, setIsFindingStream] = useState(false);
 
   useEffect(() => {
     if (!movie) {
@@ -178,14 +179,30 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
 
           {/* Action Row */}
           <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
-            {/* Assistir Button (Opens externally via Intent/VLC) */}
+            {/* Assistir Button */}
             <button
               type="button"
-              onClick={() => onPlay(movie)}
-              className="w-full sm:flex-1 flex items-center justify-center gap-2.5 bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold py-3.5 px-6 rounded-2xl text-base shadow-xl shadow-orange-950/40 active:scale-[0.98] transition-all"
+              disabled={isFindingStream}
+              onClick={() => {
+                if (!movie.streamUrl) {
+                  setIsFindingStream(true);
+                }
+                onPlay(movie);
+                setTimeout(() => setIsFindingStream(false), 2500);
+              }}
+              className="w-full sm:flex-1 flex items-center justify-center gap-2.5 bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 hover:from-orange-600 hover:to-amber-700 disabled:opacity-80 text-white font-bold py-3.5 px-6 rounded-2xl text-base shadow-xl shadow-orange-950/40 active:scale-[0.98] transition-all"
             >
-              <Play className="w-5 h-5 fill-white stroke-none" />
-              <span>Assistir</span>
+              {isFindingStream ? (
+                <>
+                  <div className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin shrink-0" />
+                  <span>Localizando mídia...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-5 h-5 fill-white stroke-none" />
+                  <span>Assistir</span>
+                </>
+              )}
             </button>
 
             {/* Favorite toggle */}
@@ -220,6 +237,22 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Overlay de Transição Elegante (Solução 2) */}
+      {isFindingStream && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="flex flex-col items-center p-7 bg-[#161924] border border-orange-500/30 rounded-3xl shadow-2xl space-y-4 max-w-xs text-center">
+            <div className="relative flex items-center justify-center w-16 h-16">
+              <div className="absolute inset-0 rounded-full border-4 border-orange-500/20 border-t-orange-500 animate-spin" />
+              <Play className="w-7 h-7 text-orange-500 fill-orange-500 ml-0.5" />
+            </div>
+            <div>
+              <h4 className="text-white font-bold text-base">Buscando transmissão...</h4>
+              <p className="text-neutral-400 text-xs mt-1">Consultando servidor IPTV</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

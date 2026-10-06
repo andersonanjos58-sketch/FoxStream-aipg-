@@ -1380,129 +1380,138 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun getMovieDetailsOnDemand(movie: MovieItem, onLoaded: (MovieItem) -> Unit) {
-        val targetMovie = if (movie.id.startsWith("tmdb_") || movie.streamUrl.isBlank() || movie.playlistId.isBlank()) {
-            findLocalMovieStream(movie.name, movie.year)?.let { local ->
-                movie.copy(
-                    id = local.id,
-                    playlistId = local.playlistId,
-                    streamUrl = local.streamUrl
-                )
-            } ?: movie
-        } else {
-            movie
-        }
-        val playlistId = targetMovie.playlistId
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            val targetMovie = if (movie.id.startsWith("tmdb_") || movie.streamUrl.isBlank() || movie.playlistId.isBlank()) {
+                findLocalMovieStream(movie.name, movie.year)?.let { local ->
+                    movie.copy(
+                        id = local.id,
+                        playlistId = local.playlistId,
+                        streamUrl = local.streamUrl
+                    )
+                } ?: movie
+            } else {
+                movie
+            }
+            val playlistId = targetMovie.playlistId
             var currentUpdated = targetMovie
             var xtreamImdbId: String? = null
             var xtreamOriginalName: String? = null
 
-            val p = withContext(Dispatchers.IO) {
-                db.playlistDao().getPlaylistById(playlistId)
-            }
+            val p = db.playlistDao().getPlaylistById(playlistId)
             if (p != null && p.type == PlaylistType.XTREAM && p.serverUrl != null && p.username != null && p.password != null) {
-                val client = XtreamApiClient(p.serverUrl, p.username, p.password)
-                val json = client.getVodDetails(targetMovie.id)
-                if (json != null && json.has("info")) {
-                    val info = json.getJSONObject("info")
-                    xtreamImdbId = info.optString("imdb_id").trim().takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
-                    xtreamOriginalName = if (info.has("o_name")) info.optString("o_name") else info.optString("original_name")
-                    if (xtreamOriginalName.isNullOrBlank() || xtreamOriginalName.equals("null", ignoreCase = true)) {
-                        xtreamOriginalName = null
-                    }
-
-                    val plot = info.optString("plot", info.optString("description", targetMovie.description ?: ""))
-                    val rawDirector = info.optString("director", targetMovie.director ?: "")
-                    val rawCast = info.optString("cast", targetMovie.cast ?: "")
-                    val durationSecs = info.optInt("duration_secs", 0)
-                    val rawDuration = if (durationSecs > 0) {
-                        "${Math.round(durationSecs.toFloat() / 60)} min"
-                    } else {
-                        info.optString("duration", targetMovie.duration ?: "")
-                    }
-                    val genre = info.optString("genre", targetMovie.genre ?: targetMovie.category)
-                    val rating = if (info.has("rating_5based")) {
-                        "${info.optDouble("rating_5based", 0.0)}/5"
-                    } else if (info.has("rating") && !info.isNull("rating")) {
-                        "${info.optString("rating")}/10"
-                    } else targetMovie.rating
-                    var backdrop: String? = null
-                    if (info.has("backdrop_path")) {
-                        val bArray = info.optJSONArray("backdrop_path")
-                        if (bArray != null && bArray.length() > 0) {
-                            backdrop = bArray.optString(0)
+                try {
+                    val client = XtreamApiClient(p.serverUrl, p.username, p.password)
+                    val json = client.getVodDetails(targetMovie.id)
+                    if (json != null && json.has("info")) {
+                        val info = json.getJSONObject("info")
+                        xtreamImdbId = info.optString("imdb_id").trim().takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+                        xtreamOriginalName = if (info.has("o_name")) info.optString("o_name") else info.optString("original_name")
+                        if (xtreamOriginalName.isNullOrBlank() || xtreamOriginalName.equals("null", ignoreCase = true)) {
+                            xtreamOriginalName = null
                         }
+
+                        val plot = info.optString("plot", info.optString("description", targetMovie.description ?: ""))
+                        val rawDirector = info.optString("director", targetMovie.director ?: "")
+                        val rawCast = info.optString("cast", targetMovie.cast ?: "")
+                        val durationSecs = info.optInt("duration_secs", 0)
+                        val rawDuration = if (durationSecs > 0) {
+                            "${Math.round(durationSecs.toFloat() / 60)} min"
+                        } else {
+                            info.optString("duration", targetMovie.duration ?: "")
+                        }
+                        val genre = info.optString("genre", targetMovie.genre ?: targetMovie.category)
+                        val rating = if (info.has("rating_5based")) {
+                            "${info.optDouble("rating_5based", 0.0)}/5"
+                        } else if (info.has("rating") && !info.isNull("rating")) {
+                            "${info.optString("rating")}/10"
+                        } else targetMovie.rating
+                        var backdrop: String? = null
+                        if (info.has("backdrop_path")) {
+                            val bArray = info.optJSONArray("backdrop_path")
+                            if (bArray != null && bArray.length() > 0) {
+                                backdrop = bArray.optString(0)
+                            }
+                        }
+
+                        // Clean dummy placeholder text like "RedeCanais"
+                        val cleanDirector = rawDirector.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
+                        val cleanCast = rawCast.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
+                        val cleanDuration = rawDuration.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
+
+                        currentUpdated = targetMovie.copy(
+                            description = if (plot.isNotBlank()) plot else targetMovie.description,
+                            director = cleanDirector ?: targetMovie.director,
+                            cast = cleanCast ?: targetMovie.cast,
+                            duration = cleanDuration ?: targetMovie.duration,
+                            genre = if (genre.isNotBlank()) genre else targetMovie.genre,
+                            rating = rating ?: targetMovie.rating,
+                            backdropUrl = backdrop ?: targetMovie.backdropUrl
+                        )
                     }
-
-                    // Clean dummy placeholder text like "RedeCanais"
-                    val cleanDirector = rawDirector.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
-                    val cleanCast = rawCast.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
-                    val cleanDuration = rawDuration.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
-
-                    currentUpdated = targetMovie.copy(
-                        description = if (plot.isNotBlank()) plot else targetMovie.description,
-                        director = cleanDirector ?: targetMovie.director,
-                        cast = cleanCast ?: targetMovie.cast,
-                        duration = cleanDuration ?: targetMovie.duration,
-                        genre = if (genre.isNotBlank()) genre else targetMovie.genre,
-                        rating = rating ?: targetMovie.rating,
-                        backdropUrl = backdrop ?: targetMovie.backdropUrl
-                    )
+                } catch (e: Exception) {
+                    Log.e("FoxStreamViewModel", "Error fetching Xtream VOD details: ${e.message}")
                 }
             }
 
             // 1. Consultar TMDb (primário, com sinopse em PT-BR, backdrop 1280p, pôster HD, notas e elenco)
-            val tmdb = TmdbApiClient.getMovieDetails(
-                rawTitle = currentUpdated.name,
-                rawYear = currentUpdated.year,
-                imdbId = xtreamImdbId,
-                originalTitle = xtreamOriginalName
-            )
-            if (tmdb != null) {
-                currentUpdated = currentUpdated.copy(
-                    posterUrl = tmdb.poster ?: currentUpdated.posterUrl,
-                    backdropUrl = tmdb.backdrop ?: currentUpdated.backdropUrl,
-                    year = tmdb.year ?: currentUpdated.year,
-                    director = tmdb.director ?: currentUpdated.director,
-                    cast = tmdb.cast ?: currentUpdated.cast,
-                    duration = tmdb.runtime ?: currentUpdated.duration,
-                    genre = tmdb.genre ?: currentUpdated.genre,
-                    rating = tmdb.rating ?: currentUpdated.rating,
-                    description = tmdb.plot ?: currentUpdated.description
-                )
-            } else {
-                // 2. Fallback secundário para OMDb caso o TMDb não localize o título
-                val omdb = OmdbApiClient.getMovieDetails(
+            try {
+                val tmdb = TmdbApiClient.getMovieDetails(
                     rawTitle = currentUpdated.name,
                     rawYear = currentUpdated.year,
                     imdbId = xtreamImdbId,
-                    originalTitle = xtreamOriginalName,
-                    isSeries = false
+                    originalTitle = xtreamOriginalName
                 )
-                if (omdb != null) {
+                if (tmdb != null) {
                     currentUpdated = currentUpdated.copy(
-                        posterUrl = omdb.poster ?: currentUpdated.posterUrl,
-                        year = omdb.year ?: currentUpdated.year,
-                        director = omdb.director ?: currentUpdated.director,
-                        cast = omdb.cast ?: currentUpdated.cast,
-                        duration = omdb.runtime ?: currentUpdated.duration,
-                        genre = omdb.genre ?: currentUpdated.genre,
-                        rating = omdb.imdbRating?.let { "$it/10" } ?: currentUpdated.rating,
-                        description = omdb.plot ?: currentUpdated.description
+                        posterUrl = tmdb.poster ?: currentUpdated.posterUrl,
+                        backdropUrl = tmdb.backdrop ?: currentUpdated.backdropUrl,
+                        year = tmdb.year ?: currentUpdated.year,
+                        director = tmdb.director ?: currentUpdated.director,
+                        cast = tmdb.cast ?: currentUpdated.cast,
+                        duration = tmdb.runtime ?: currentUpdated.duration,
+                        genre = tmdb.genre ?: currentUpdated.genre,
+                        rating = tmdb.rating ?: currentUpdated.rating,
+                        description = tmdb.plot ?: currentUpdated.description
                     )
+                } else {
+                    // 2. Fallback secundário para OMDb caso o TMDb não localize o título
+                    val omdb = OmdbApiClient.getMovieDetails(
+                        rawTitle = currentUpdated.name,
+                        rawYear = currentUpdated.year,
+                        imdbId = xtreamImdbId,
+                        originalTitle = xtreamOriginalName,
+                        isSeries = false
+                    )
+                    if (omdb != null) {
+                        currentUpdated = currentUpdated.copy(
+                            posterUrl = omdb.poster ?: currentUpdated.posterUrl,
+                            year = omdb.year ?: currentUpdated.year,
+                            director = omdb.director ?: currentUpdated.director,
+                            cast = omdb.cast ?: currentUpdated.cast,
+                            duration = omdb.runtime ?: currentUpdated.duration,
+                            genre = omdb.genre ?: currentUpdated.genre,
+                            rating = omdb.imdbRating?.let { "$it/10" } ?: currentUpdated.rating,
+                            description = omdb.plot ?: currentUpdated.description
+                        )
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e("FoxStreamViewModel", "Error fetching movie TMDb/OMDb details: ${e.message}")
             }
 
             if (currentUpdated != movie) {
-                withContext(Dispatchers.IO) {
-                    db.movieDao().insertMovies(listOf(currentUpdated))
-                }
-                val idx = movies.indexOfFirst { it.id == currentUpdated.id }
-                if (idx >= 0) {
-                    movies[idx] = currentUpdated
+                db.movieDao().insertMovies(listOf(currentUpdated))
+                withContext(Dispatchers.Main) {
+                    val idx = movies.indexOfFirst { it.id == currentUpdated.id }
+                    if (idx >= 0) {
+                        movies[idx] = currentUpdated
+                    }
                 }
             }
-            onLoaded(currentUpdated)
+
+            withContext(Dispatchers.Main) {
+                onLoaded(currentUpdated)
+            }
         }
     }
 

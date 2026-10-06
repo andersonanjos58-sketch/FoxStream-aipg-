@@ -58,6 +58,8 @@ fun MovieDetailsScreen(
     var currentMovie by remember(movie.id) { mutableStateOf(movie) }
     var selectedPlayerEngine by remember { mutableStateOf("VLC") } // "VLC" ou "ExoPlayer"
     var isLoadingDetails by remember { mutableStateOf(false) }
+    var isFindingStream by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     // Intercepta o botão voltar nativo
     BackHandler {
@@ -241,8 +243,12 @@ fun MovieDetailsScreen(
 
                     // Botão Principal "Assistir / Play" Destacado
                     Button(
+                        enabled = !isFindingStream,
                         onClick = {
                             val useVlc = selectedPlayerEngine == "VLC"
+                            if (currentMovie.streamUrl.isBlank()) {
+                                isFindingStream = true
+                            }
                             if (onNavigateToPlayer != null) {
                                 val route = NavDestinations.buildPlayerRoute(currentMovie.streamUrl)
                                 onNavigateToPlayer(route)
@@ -257,20 +263,35 @@ fun MovieDetailsScreen(
                             .height(50.dp),
                         contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (hasHistory) "Continuar Assistindo ($resumePositionText)" else "Assistir Agora (LibVLC)",
-                            color = Color.Black,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp,
-                            letterSpacing = 0.5.sp
-                        )
+                        if (isFindingStream) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.5.dp
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Localizando mídia na lista...",
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.5.sp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (hasHistory) "Continuar Assistindo ($resumePositionText)" else "Assistir Agora (LibVLC)",
+                                color = Color.Black,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
                     }
                 }
             }
@@ -767,6 +788,67 @@ fun MovieDetailsScreen(
                             tint = if (isFavorite) OrangePrimary else Color.White,
                             modifier = Modifier.size(20.dp)
                         )
+                    }
+                }
+            }
+
+            // Overlay de Transição Elegante (Solução 2)
+            AnimatedVisibility(
+                visible = isFindingStream,
+                enter = fadeIn() + scaleIn(initialScale = 0.92f),
+                exit = fadeOut() + scaleOut(targetScale = 0.92f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.85f))
+                        .clickable(enabled = false) {},
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardSurfaceColor),
+                        border = BorderStroke(1.dp, Color(0x33FF6600)),
+                        elevation = CardDefaults.cardElevation(16.dp),
+                        modifier = Modifier
+                            .padding(32.dp)
+                            .widthIn(max = 300.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.size(60.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.fillMaxSize(),
+                                    color = OrangePrimary,
+                                    strokeWidth = 3.dp
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = OrangePrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Text(
+                                text = "Buscando transmissão...",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Consultando servidor IPTV",
+                                color = Color.Gray,
+                                fontSize = 12.5.sp
+                            )
+                        }
                     }
                 }
             }
