@@ -155,7 +155,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
     const timer = setInterval(() => {
       setCurrentFeaturedIndex(prev => (prev + 1) % featuredList.length);
-    }, 2500);
+    }, 3000);
 
     return () => clearInterval(timer);
   }, [featuredList.length, isPaused]);

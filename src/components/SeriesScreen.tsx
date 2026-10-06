@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Clapperboard, Search, Star, Heart, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, Filter, X } from 'lucide-react';
+import { Clapperboard, Search, Star, Heart, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, Filter, X, Play } from 'lucide-react';
 import { SeriesItem } from '../types';
 
 interface SeriesScreenProps {
@@ -21,6 +21,8 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
   const [selectedCategoryForGrid, setSelectedCategoryForGrid] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [visibleLimit, setVisibleLimit] = useState<number>(60);
+  const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState<number>(0);
+  const [isFeaturedPaused, setIsFeaturedPaused] = useState<boolean>(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -42,6 +44,22 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
   const allCategories = useMemo(() => {
     return Array.from(categoriesMap.keys());
   }, [categoriesMap]);
+
+  // Featured series for hero carousel
+  const featuredSeries = useMemo(() => {
+    return (series || []).filter((s) => s && s.posterUrl).slice(0, 8);
+  }, [series]);
+
+  // Auto-Scroll automático com intervalo de 3 segundos e pausa na interação
+  useEffect(() => {
+    if (featuredSeries.length <= 1 || isFeaturedPaused) return;
+
+    const timer = setInterval(() => {
+      setCurrentFeaturedIndex((prev) => (prev + 1) % featuredSeries.length);
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [featuredSeries.length, isFeaturedPaused]);
 
   // Global search across all series
   const searchResults = useMemo(() => {
@@ -315,6 +333,107 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
       ) : (
         /* VIEW 3: ONE CAROUSEL PER CATEGORY (MAIN VIEW) */
         <div className="space-y-8">
+          {/* Carrossel de Destaques de Séries com Auto-Scroll de 3 segundos */}
+          {featuredSeries.length > 0 && (
+            <div
+              onMouseEnter={() => setIsFeaturedPaused(true)}
+              onMouseLeave={() => setIsFeaturedPaused(false)}
+              onTouchStart={() => setIsFeaturedPaused(true)}
+              onTouchEnd={() => setIsFeaturedPaused(false)}
+              className="relative h-64 sm:h-80 md:h-96 w-full rounded-3xl overflow-hidden shadow-2xl border border-neutral-800/80 group transition-all duration-500"
+            >
+              {(() => {
+                const currentSeries = featuredSeries[currentFeaturedIndex] || featuredSeries[0];
+                const seasonCount = currentSeries.seasons?.length || 1;
+                return (
+                  <>
+                    {/* Background Backdrop */}
+                    {currentSeries.posterUrl ? (
+                      <img
+                        key={`hero_series_bg_${currentSeries.id}`}
+                        src={currentSeries.posterUrl}
+                        alt={currentSeries.name}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover blur-sm opacity-35 scale-105 transition-all duration-700 animate-in fade-in"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-r from-rose-950/30 to-neutral-900" />
+                    )}
+
+                    {/* Gradients */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#090a0f] via-[#090a0f]/60 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#090a0f] via-[#090a0f]/40 to-transparent" />
+
+                    {/* Content Overlay */}
+                    <div className="absolute bottom-6 left-4 sm:left-8 right-4 max-w-2xl space-y-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs bg-rose-500/20 border border-rose-500/30 text-rose-400 font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">
+                          EM DESTAQUE
+                        </span>
+                        {currentSeries.category && (
+                          <span className="text-xs text-neutral-300 font-medium">
+                            • {currentSeries.category}
+                          </span>
+                        )}
+                        <span className="text-xs text-neutral-400 font-medium">
+                          • {seasonCount} {seasonCount === 1 ? 'Temporada' : 'Temporadas'}
+                        </span>
+                        {currentSeries.rating && (
+                          <span className="text-xs text-amber-400 font-medium flex items-center gap-0.5">
+                            ★ {currentSeries.rating}
+                          </span>
+                        )}
+                      </div>
+
+                      <h2 className="text-2xl sm:text-4xl font-black text-white font-['Outfit'] tracking-tight line-clamp-2">
+                        {currentSeries.name}
+                      </h2>
+
+                      {currentSeries.description && (
+                        <p className="text-xs text-neutral-400 line-clamp-2 max-w-lg">
+                          {currentSeries.description}
+                        </p>
+                      )}
+
+                      <div className="flex items-center gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => onSelectSeries(currentSeries)}
+                          className="flex items-center gap-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-700 hover:to-amber-700 text-white font-bold py-2.5 px-6 rounded-xl text-xs shadow-lg shadow-rose-950/40 active:scale-95 transition-all cursor-pointer"
+                        >
+                          <Play className="w-4 h-4 fill-white stroke-none" />
+                          <span>Ver Episódios</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Pager Dots */}
+                    {featuredSeries.length > 1 && (
+                      <div className="absolute bottom-4 right-6 flex items-center gap-1.5 z-10">
+                        {featuredSeries.map((_, idx) => (
+                          <button
+                            key={`pager_dot_series_${idx}`}
+                            type="button"
+                            onClick={() => {
+                              setCurrentFeaturedIndex(idx);
+                              setIsFeaturedPaused(true);
+                            }}
+                            className={`h-1.5 rounded-full transition-all duration-300 ${
+                              idx === currentFeaturedIndex
+                                ? 'w-6 bg-rose-500'
+                                : 'w-1.5 bg-neutral-600 hover:bg-neutral-400'
+                            }`}
+                            aria-label={`Ir para destaque ${idx + 1}`}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {allCategories.map((catName) => {
             const catSeries = categoriesMap.get(catName) || [];
             if (catSeries.length === 0) return null;

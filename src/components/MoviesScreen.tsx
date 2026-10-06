@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Film, Search, Star, Heart, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, Filter, X } from 'lucide-react';
+import { Film, Search, Star, Heart, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, Filter, X, Play } from 'lucide-react';
 import { MovieItem } from '../types';
 
 interface MoviesScreenProps {
@@ -21,6 +21,8 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
   const [selectedCategoryForGrid, setSelectedCategoryForGrid] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [visibleLimit, setVisibleLimit] = useState<number>(60);
+  const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState<number>(0);
+  const [isFeaturedPaused, setIsFeaturedPaused] = useState<boolean>(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -42,6 +44,22 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
   const allCategories = useMemo(() => {
     return Array.from(categoriesMap.keys());
   }, [categoriesMap]);
+
+  // Featured movies for hero carousel
+  const featuredMovies = useMemo(() => {
+    return (movies || []).filter((m) => m && (m.posterUrl || m.backdropUrl)).slice(0, 8);
+  }, [movies]);
+
+  // Auto-Scroll automático com intervalo de 3 segundos e pausa na interação
+  useEffect(() => {
+    if (featuredMovies.length <= 1 || isFeaturedPaused) return;
+
+    const timer = setInterval(() => {
+      setCurrentFeaturedIndex((prev) => (prev + 1) % featuredMovies.length);
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [featuredMovies.length, isFeaturedPaused]);
 
   // Global search across all movies
   const searchResults = useMemo(() => {
@@ -316,6 +334,108 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
       ) : (
         /* VIEW 3: ONE CAROUSEL PER CATEGORY (MAIN VIEW) */
         <div className="space-y-8">
+          {/* Carrossel de Destaques de Filmes com Auto-Scroll de 3 segundos */}
+          {featuredMovies.length > 0 && (
+            <div
+              onMouseEnter={() => setIsFeaturedPaused(true)}
+              onMouseLeave={() => setIsFeaturedPaused(false)}
+              onTouchStart={() => setIsFeaturedPaused(true)}
+              onTouchEnd={() => setIsFeaturedPaused(false)}
+              className="relative h-64 sm:h-80 md:h-96 w-full rounded-3xl overflow-hidden shadow-2xl border border-neutral-800/80 group transition-all duration-500"
+            >
+              {(() => {
+                const currentMovie = featuredMovies[currentFeaturedIndex] || featuredMovies[0];
+                return (
+                  <>
+                    {/* Background Backdrop */}
+                    {currentMovie.backdropUrl || currentMovie.posterUrl ? (
+                      <img
+                        key={`hero_bg_${currentMovie.id}`}
+                        src={currentMovie.backdropUrl || currentMovie.posterUrl}
+                        alt={currentMovie.name}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover blur-sm opacity-35 scale-105 transition-all duration-700 animate-in fade-in"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-r from-amber-950/30 to-neutral-900" />
+                    )}
+
+                    {/* Gradients */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#090a0f] via-[#090a0f]/60 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#090a0f] via-[#090a0f]/40 to-transparent" />
+
+                    {/* Content Overlay */}
+                    <div className="absolute bottom-6 left-4 sm:left-8 right-4 max-w-2xl space-y-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">
+                          EM DESTAQUE
+                        </span>
+                        {currentMovie.category && (
+                          <span className="text-xs text-neutral-300 font-medium">
+                            • {currentMovie.category}
+                          </span>
+                        )}
+                        {currentMovie.year && (
+                          <span className="text-xs text-neutral-400 font-medium">
+                            • {currentMovie.year}
+                          </span>
+                        )}
+                        {currentMovie.rating && (
+                          <span className="text-xs text-amber-400 font-medium flex items-center gap-0.5">
+                            ★ {currentMovie.rating}
+                          </span>
+                        )}
+                      </div>
+
+                      <h2 className="text-2xl sm:text-4xl font-black text-white font-['Outfit'] tracking-tight line-clamp-2">
+                        {currentMovie.name}
+                      </h2>
+
+                      {currentMovie.description && (
+                        <p className="text-xs text-neutral-400 line-clamp-2 max-w-lg">
+                          {currentMovie.description}
+                        </p>
+                      )}
+
+                      <div className="flex items-center gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => onSelectMovie(currentMovie)}
+                          className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-black font-bold py-2.5 px-6 rounded-xl text-xs shadow-lg shadow-amber-950/40 active:scale-95 transition-all cursor-pointer"
+                        >
+                          <Play className="w-4 h-4 fill-black stroke-none" />
+                          <span>Assistir</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Pager Dots */}
+                    {featuredMovies.length > 1 && (
+                      <div className="absolute bottom-4 right-6 flex items-center gap-1.5 z-10">
+                        {featuredMovies.map((_, idx) => (
+                          <button
+                            key={`pager_dot_${idx}`}
+                            type="button"
+                            onClick={() => {
+                              setCurrentFeaturedIndex(idx);
+                              setIsFeaturedPaused(true);
+                            }}
+                            className={`h-1.5 rounded-full transition-all duration-300 ${
+                              idx === currentFeaturedIndex
+                                ? 'w-6 bg-amber-500'
+                                : 'w-1.5 bg-neutral-600 hover:bg-neutral-400'
+                            }`}
+                            aria-label={`Ir para destaque ${idx + 1}`}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {allCategories.map((catName) => {
             const catMovies = categoriesMap.get(catName) || [];
             if (catMovies.length === 0) return null;

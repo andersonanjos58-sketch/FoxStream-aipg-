@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -255,14 +256,15 @@ fun HeroBannerCarousel(
     }
 
     val pagerState = rememberPagerState(pageCount = { items.size })
-    var isTouched by remember { mutableStateOf(false) }
+    val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
 
+    // Auto-Scroll automático com intervalo de 3 segundos e pausa na interação/arrasto
     if (items.size > 1) {
-        LaunchedEffect(pagerState.isScrollInProgress, isTouched, items.size) {
-            if (!pagerState.isScrollInProgress && !isTouched) {
+        LaunchedEffect(pagerState, isDragged, items.size) {
+            if (!isDragged) {
                 while (true) {
                     delay(3000L)
-                    if (!pagerState.isScrollInProgress && !isTouched) {
+                    if (!isDragged) {
                         try {
                             val nextPage = (pagerState.currentPage + 1) % items.size
                             pagerState.animateScrollToPage(nextPage)
@@ -278,15 +280,7 @@ fun HeroBannerCarousel(
             state = pagerState,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(275.dp)
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            isTouched = event.changes.any { it.pressed }
-                        }
-                    }
-                },
+                .height(275.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
             pageSpacing = 12.dp
         ) { page ->
@@ -1523,6 +1517,31 @@ fun MoviesScreen(
         categoriesMap.keys.toList()
     }
 
+    // Destaques de Filmes (Carrossel Hero Banner)
+    val movieHeroItems = remember(movies) {
+        movies.filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
+            .take(8)
+            .map { m ->
+                HeroBannerItem(
+                    id = "movie_hero_${m.id}",
+                    title = m.name,
+                    imageUrl = m.backdropUrl ?: m.posterUrl ?: "",
+                    category = m.category,
+                    type = ContentType.MOVIE,
+                    streamUrl = m.streamUrl,
+                    badgeInfo = listOfNotNull(
+                        "FILME",
+                        m.year,
+                        m.rating?.let { "★ $it" },
+                        m.category.takeIf { it.isNotBlank() && it != "Filmes" }
+                    ).joinToString(" • "),
+                    overview = m.description,
+                    year = m.year,
+                    movieItem = m
+                )
+            }
+    }
+
     // Global Search across entire movie catalog
     val searchResults = remember(debouncedSearchQuery, movies) {
         if (debouncedSearchQuery.isBlank()) emptyList()
@@ -1778,6 +1797,26 @@ fun MoviesScreen(
                     contentPadding = PaddingValues(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // Carrossel de Destaques de Filmes com Auto-Scroll de 3 segundos
+                    if (movieHeroItems.isNotEmpty()) {
+                        item(key = "movie_hero_banner") {
+                            Text(
+                                text = "EM DESTAQUE",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            HeroBannerCarousel(
+                                items = movieHeroItems,
+                                onPlay = onPlay,
+                                onOpenSeries = {},
+                                onOpenMovie = onOpenMovie
+                            )
+                        }
+                    }
+
                     categoriesMap.forEach { (catName, catMovies) ->
                         item(key = "cat_$catName") {
                             SectionHeaderWithAction(
@@ -2978,6 +3017,32 @@ fun SeriesScreen(
         categoriesMap.keys.toList()
     }
 
+    // Destaques de Séries (Carrossel Hero Banner)
+    val seriesHeroItems = remember(seriesList) {
+        seriesList.filter { !it.posterUrl.isNullOrBlank() }
+            .take(8)
+            .map { s ->
+                val firstEpUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: ""
+                HeroBannerItem(
+                    id = "series_hero_${s.id}",
+                    title = s.name,
+                    imageUrl = s.posterUrl ?: "",
+                    category = s.category,
+                    type = ContentType.SERIES,
+                    streamUrl = firstEpUrl,
+                    badgeInfo = listOfNotNull(
+                        "SÉRIE",
+                        s.year,
+                        s.rating?.let { "★ $it" },
+                        s.category.takeIf { it.isNotBlank() && it != "Séries" }
+                    ).joinToString(" • "),
+                    overview = s.description,
+                    year = s.year,
+                    seriesItem = s
+                )
+            }
+    }
+
     // Global Search across entire series catalog
     val searchResults = remember(debouncedSearchQuery, seriesList) {
         if (debouncedSearchQuery.isBlank()) emptyList()
@@ -3232,6 +3297,26 @@ fun SeriesScreen(
                     contentPadding = PaddingValues(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // Carrossel de Destaques de Séries com Auto-Scroll de 3 segundos
+                    if (seriesHeroItems.isNotEmpty()) {
+                        item(key = "series_hero_banner") {
+                            Text(
+                                text = "EM DESTAQUE",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            HeroBannerCarousel(
+                                items = seriesHeroItems,
+                                onPlay = { _, _, _ -> },
+                                onOpenSeries = { onOpenSeriesItem(it) },
+                                onOpenMovie = {}
+                            )
+                        }
+                    }
+
                     categoriesMap.forEach { (catName, catSeries) ->
                         item(key = "cat_$catName") {
                             SectionHeaderWithAction(
