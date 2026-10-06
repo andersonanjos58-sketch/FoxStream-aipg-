@@ -138,41 +138,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return list.slice(0, 8);
   }, [trendingItems, movies, series]);
 
-  // Hydrate instantly when playlist changes
+  // Hydrate from persistent cache if available
   React.useEffect(() => {
     if (initialCache) {
       if (initialCache.trending?.length) setTrendingItems(initialCache.trending);
       if (initialCache.popularMovies?.length) setPopularMoviesList(initialCache.popularMovies);
       if (initialCache.popularSeries?.length) setPopularSeriesList(initialCache.popularSeries);
       if (initialCache.newReleases?.length) setNewReleasesList(initialCache.newReleases);
-    } else {
-      setTrendingItems([...movies.slice(0, 10), ...series.slice(0, 10)]);
-      setPopularMoviesList(movies.slice(0, 15));
-      setPopularSeriesList(series.slice(0, 15));
-      const currentYear = new Date().getFullYear().toString();
-      const prevYear = (new Date().getFullYear() - 1).toString();
-      const localReleases = [
-        ...movies.filter(m => m.year === currentYear || m.year === prevYear),
-        ...series.filter(s => s.year === currentYear || s.year === prevYear)
-      ];
-      const lastAdded = [...movies.slice(-15), ...series.slice(-15)];
-      const combined: (MovieItem | SeriesItem)[] = [];
-      const seen = new Set<string>();
-      localReleases.forEach(item => {
-        if (!seen.has(item.id)) {
-          seen.add(item.id);
-          combined.push(item);
-        }
-      });
-      lastAdded.forEach(item => {
-        if (!seen.has(item.id)) {
-          seen.add(item.id);
-          combined.push(item);
-        }
-      });
-      setNewReleasesList(combined.slice(0, 20));
     }
-  }, [initialCache, movies, series]);
+  }, [initialCache]);
 
   React.useEffect(() => {
     if (featuredList.length <= 1 || isPaused) return;
@@ -229,9 +203,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             seasons: []
           } as any);
         });
-        const finalTrending = matchedTrending.length >= 3 
-          ? matchedTrending.slice(0, 15) 
-          : [...movies.slice(0, 8), ...series.slice(0, 8)];
+        const finalTrending = matchedTrending.length > 0 ? matchedTrending.slice(0, 15) : [];
         setTrendingItems(finalTrending);
 
         // 2. Filmes Populares (Popular Movies)
@@ -250,7 +222,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             description: tmdb.plot
           });
         });
-        const finalPopM = matchedPopM.length >= 3 ? matchedPopM.slice(0, 15) : movies.slice(0, 15);
+        const finalPopM = matchedPopM.length > 0 ? matchedPopM.slice(0, 15) : [];
         setPopularMoviesList(finalPopM);
 
         // 3. Séries Populares (Popular TV)
@@ -269,7 +241,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             seasons: []
           });
         });
-        const finalPopTv = matchedPopTv.length >= 3 ? matchedPopTv.slice(0, 15) : series.slice(0, 15);
+        const finalPopTv = matchedPopTv.length > 0 ? matchedPopTv.slice(0, 15) : [];
         setPopularSeriesList(finalPopTv);
 
         // 4. Lançamentos (Now Playing Movies & Airing Series)
@@ -303,31 +275,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           } as any);
         });
 
-        const currentYear = new Date().getFullYear().toString();
-        const prevYear = (new Date().getFullYear() - 1).toString();
-        const localReleases = [
-          ...movies.filter(m => m.year === currentYear || m.year === prevYear),
-          ...series.filter(s => s.year === currentYear || s.year === prevYear)
-        ];
-        const lastAdded = [...movies.slice(-15), ...series.slice(-15)];
-        const combinedFallback: (MovieItem | SeriesItem)[] = [];
-        const seen = new Set<string>();
-        localReleases.forEach(item => {
-          if (!seen.has(item.id)) {
-            seen.add(item.id);
-            combinedFallback.push(item);
-          }
-        });
-        lastAdded.forEach(item => {
-          if (!seen.has(item.id)) {
-            seen.add(item.id);
-            combinedFallback.push(item);
-          }
-        });
-
-        const finalReleases = matchedReleases.length >= 3 
-          ? matchedReleases.slice(0, 20) 
-          : combinedFallback.slice(0, 20);
+        const finalReleases = matchedReleases.length > 0 ? matchedReleases.slice(0, 20) : [];
         setNewReleasesList(finalReleases);
 
         // Save into persistent local storage cache for instant opening next time

@@ -48,11 +48,13 @@ jobs:
 
       - name: Publish GitHub Release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: v1.0.0-latest
+          tag: "v1.0.0-latest"
           name: "FoxStream APK (Build Automático)"
           body: "Versão compilada do aplicativo FoxStream Android."
-          files: android/app/build/outputs/apk/debug/*.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: "android/app/build/outputs/apk/debug/*.apk"
+          allowUpdates: true
+          recreateRelease: true
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}

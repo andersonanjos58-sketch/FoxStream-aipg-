@@ -145,101 +145,37 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
                 seriesList.clear()
                 seriesList.addAll(pSeries)
 
-                // 1. PHASE 1: Immediate Local-First Hydration (< 10ms)
+                // Phase 1: Render cached TMDb Home carousels if available, otherwise fetch from TMDb API
                 val cached = withContext(Dispatchers.IO) {
                     HomeCacheManager.load(getApplication(), db, playlistId)
                 }
                 
-                val fallbackBanners = buildLocalFallbackBanners(pMovies, pSeries)
-                val fallbackTrending = pMovies.take(15)
-                val fallbackPopMovies = pMovies.shuffled().take(15)
-                val fallbackPopSeries = pSeries.take(15)
-
-                val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
-                val lastYear = (java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) - 1).toString()
-                val moviesReleases = pMovies.filter { it.year == currentYear || it.year == lastYear }
-                val seriesReleases = pSeries.filter { it.year == currentYear || it.year == lastYear }
-
-                val combinedReleasesList = mutableListOf<MovieItem>()
-                moviesReleases.forEach { combinedReleasesList.add(it) }
-                seriesReleases.forEach { s ->
-                    combinedReleasesList.add(
-                        MovieItem(
-                            id = "series_${s.id}", // prefixed ID to indicate converted Series Item
-                            playlistId = s.playlistId,
-                            name = s.name,
-                            streamUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: "",
-                            posterUrl = s.posterUrl,
-                            backdropUrl = s.backdropUrl,
-                            rating = s.rating,
-                            description = s.description,
-                            year = s.year,
-                            category = s.category
-                        )
-                    )
-                }
-
-                val fallbackReleases = if (combinedReleasesList.isNotEmpty()) {
-                    combinedReleasesList.sortedWith(
-                        compareByDescending<MovieItem> { it.year }
-                        .thenByDescending { it.id }
-                    ).take(20)
-                } else {
-                    val fallbacks = mutableListOf<MovieItem>()
-                    pMovies.sortedByDescending { it.id }.take(10).forEach { fallbacks.add(it) }
-                    pSeries.sortedByDescending { it.id }.take(10).forEach { s ->
-                        fallbacks.add(
-                            MovieItem(
-                                id = "series_${s.id}",
-                                playlistId = s.playlistId,
-                                name = s.name,
-                                streamUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: "",
-                                posterUrl = s.posterUrl,
-                                backdropUrl = s.backdropUrl,
-                                rating = s.rating,
-                                description = s.description,
-                                year = s.year,
-                                category = s.category
-                            )
-                        )
-                    }
-                    fallbacks.sortedByDescending { it.id }.take(15)
-                }
-
                 if (cached != null) {
-                    // Render from persistent cache, falling back to local playlist items if any carousel list was empty
-                    featuredBannerItems.clear()
-                    featuredBannerItems.addAll(cached.featuredBanners.ifEmpty { fallbackBanners })
-
-                    trendingMovies.clear()
-                    trendingMovies.addAll(cached.trendingMovies.ifEmpty { fallbackTrending })
-
-                    popularMovies.clear()
-                    popularMovies.addAll(cached.popularMovies.ifEmpty { fallbackPopMovies })
-
-                    popularSeries.clear()
-                    popularSeries.addAll(cached.popularSeries.ifEmpty { fallbackPopSeries })
-
-                    newReleases.clear()
-                    newReleases.addAll(cached.newReleases.ifEmpty { fallbackReleases })
-                } else {
-                    // First run (empty cache): Immediately populate from local items so Home renders in 0ms!
-                    featuredBannerItems.clear()
-                    featuredBannerItems.addAll(fallbackBanners)
-                    trendingMovies.clear()
-                    trendingMovies.addAll(fallbackTrending)
-                    popularMovies.clear()
-                    popularMovies.addAll(fallbackPopMovies)
-                    popularSeries.clear()
-                    popularSeries.addAll(fallbackPopSeries)
-                    newReleases.clear()
-                    newReleases.addAll(fallbackReleases)
+                    if (cached.featuredBanners.isNotEmpty()) {
+                        featuredBannerItems.clear()
+                        featuredBannerItems.addAll(cached.featuredBanners)
+                    }
+                    if (cached.trendingMovies.isNotEmpty()) {
+                        trendingMovies.clear()
+                        trendingMovies.addAll(cached.trendingMovies)
+                    }
+                    if (cached.popularMovies.isNotEmpty()) {
+                        popularMovies.clear()
+                        popularMovies.addAll(cached.popularMovies)
+                    }
+                    if (cached.popularSeries.isNotEmpty()) {
+                        popularSeries.clear()
+                        popularSeries.addAll(cached.popularSeries)
+                    }
+                    if (cached.newReleases.isNotEmpty()) {
+                        newReleases.clear()
+                        newReleases.addAll(cached.newReleases)
+                    }
                 }
 
-                // 2. PHASE 2: Background TMDb Check & Progressive Update (Dispatchers.IO)
-                // Always check & enrich TMDb data in background if cache is missing or stale (> 24h)
+                // Phase 2: Refresh TMDb API Home carousels if cache is stale or missing
                 val isCacheFresh = cached != null && (System.currentTimeMillis() - cached.timestamp < HomeCacheManager.CACHE_EXPIRY_MS)
-                if (!isCacheFresh) {
+                if (!isCacheFresh || featuredBannerItems.isEmpty()) {
                     refreshFeaturedBanners(playlistId, pMovies, pSeries)
                 }
             } catch (e: Exception) {
