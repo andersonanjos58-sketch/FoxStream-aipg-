@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { X, Play, Heart, Clapperboard, Calendar, Star, Layers, Tv, Clock, Copy, Check, RefreshCw } from 'lucide-react';
 import { SeriesItem, EpisodeItem, SeasonItem, Playlist } from '../types';
 import { XtreamClient } from '../services/xtreamClient';
+import { evaluateSmartMatch } from '../services/tmdbService';
 
 interface SeriesDetailsModalProps {
   series: SeriesItem | null;
+  localSeries?: SeriesItem[];
   isFavorite: boolean;
   onClose: () => void;
   onPlayEpisode: (series: SeriesItem, episode: EpisodeItem) => void;
@@ -15,6 +17,7 @@ interface SeriesDetailsModalProps {
 
 export const SeriesDetailsModal: React.FC<SeriesDetailsModalProps> = ({
   series,
+  localSeries = [],
   isFavorite,
   onClose,
   onPlayEpisode,
@@ -31,11 +34,42 @@ export const SeriesDetailsModal: React.FC<SeriesDetailsModalProps> = ({
   useEffect(() => {
     if (!series) return;
 
+    // If this is a TMDb-only showcase series (playlistId is empty), match it on-demand to the local IPTV series list!
+    let targetSeries = series;
+    if (!series.playlistId && localSeries.length > 0) {
+      console.log(`[On-Demand Series Match] Matching series: ${series.name}`);
+      let bestSeries: SeriesItem | null = null;
+      let bestScore = 64;
+
+      for (const s of localSeries) {
+        const res = evaluateSmartMatch(s.name, s.category, s.year, series.name, undefined, series.year);
+        if (res.isMatch && res.score > bestScore) {
+          bestScore = res.score;
+          bestSeries = s;
+          if (bestScore >= 98) break;
+        }
+      }
+
+      if (bestSeries) {
+        console.log(`[On-Demand Series Match] Found matched IPTV series: ${bestSeries.name}`);
+        targetSeries = {
+          ...series,
+          id: bestSeries.id,
+          playlistId: bestSeries.playlistId,
+          category: bestSeries.category || series.category
+        };
+      } else {
+        setError('Esta série não está disponível no seu servidor IPTV.');
+        setSeasons([]);
+        return;
+      }
+    }
+
     // Check if we already have loaded seasons with episodes to avoid duplicate fetches
-    const hasEpisodes = series.seasons && series.seasons.length > 0 && series.seasons.some(s => s.episodes && s.episodes.length > 0);
+    const hasEpisodes = targetSeries.seasons && targetSeries.seasons.length > 0 && targetSeries.seasons.some(s => s.episodes && s.episodes.length > 0);
     if (hasEpisodes) {
-      setSeasons(series.seasons);
-      const loadedSeasonNums = series.seasons.map(s => s.seasonNum);
+      setSeasons(targetSeries.seasons);
+      const loadedSeasonNums = targetSeries.seasons.map(s => s.seasonNum);
       if (loadedSeasonNums.length > 0 && !loadedSeasonNums.includes(selectedSeasonNum)) {
         setSelectedSeasonNum(loadedSeasonNums[0]);
       }
@@ -46,14 +80,14 @@ export const SeriesDetailsModal: React.FC<SeriesDetailsModalProps> = ({
       setLoading(true);
       setError(null);
       try {
-        const playlist = playlists?.find(p => p.id === series.playlistId);
+        const playlist = playlists?.find(p => p.id === targetSeries.playlistId);
         if (playlist && playlist.type === 'xtream' && playlist.serverUrl && playlist.username && playlist.password) {
           const client = new XtreamClient({
             serverUrl: playlist.serverUrl,
             username: playlist.username,
             password: playlist.password
           });
-          const seasonsData = await client.getSeriesDetails(series.id, series.id);
+          const seasonsData = await client.getSeriesDetails(targetSeries.id, targetSeries.id);
           
           if (seasonsData && seasonsData.length > 0) {
             setSeasons(seasonsData);
@@ -64,7 +98,7 @@ export const SeriesDetailsModal: React.FC<SeriesDetailsModalProps> = ({
             
             if (onUpdateSeries) {
               onUpdateSeries({
-                ...series,
+                ...targetSeries,
                 seasons: seasonsData,
                 totalEpisodes: seasonsData.reduce((acc, s) => acc + (s.episodes?.length || 0), 0)
               });
@@ -84,7 +118,7 @@ export const SeriesDetailsModal: React.FC<SeriesDetailsModalProps> = ({
     };
 
     fetchDetails();
-  }, [series, playlists, onUpdateSeries]);
+  }, [series, localSeries, playlists, onUpdateSeries]);
 
   if (!series) return null;
 

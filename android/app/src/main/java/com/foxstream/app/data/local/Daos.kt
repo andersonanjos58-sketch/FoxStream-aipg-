@@ -98,3 +98,25 @@ interface HistoryDao {
     @Query("DELETE FROM history WHERE id = :id")
     suspend fun deleteHistoryById(id: String)
 }
+
+@Dao
+interface TmdbMatchCacheDao {
+    @Query("SELECT * FROM tmdb_match_cache WHERE playlistId = :playlistId")
+    suspend fun getCacheForPlaylist(playlistId: String): List<TmdbMatchCache>
+
+    @Query("SELECT * FROM tmdb_match_cache WHERE playlistId = :playlistId AND categoryType = :categoryType ORDER BY updatedAt DESC")
+    suspend fun getCacheByCategory(playlistId: String, categoryType: String): List<TmdbMatchCache>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCache(items: List<TmdbMatchCache>)
+
+    @Query("DELETE FROM tmdb_match_cache WHERE playlistId = :playlistId")
+    suspend fun deleteCacheForPlaylist(playlistId: String)
+
+    @Query("DELETE FROM tmdb_match_cache WHERE playlistId = :playlistId AND categoryType = :categoryType")
+    suspend fun deleteCacheByCategory(playlistId: String, categoryType: String)
+
+    @Query("DELETE FROM tmdb_match_cache WHERE updatedAt < :expiryTime")
+    suspend fun deleteExpiredCache(expiryTime: Long)
+}
+

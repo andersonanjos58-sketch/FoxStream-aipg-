@@ -14,9 +14,10 @@ import com.foxstream.app.data.model.*
         MovieItem::class,
         SeriesItem::class,
         FavoriteItem::class,
-        HistoryItem::class
+        HistoryItem::class,
+        TmdbMatchCache::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -28,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun seriesDao(): SeriesDao
     abstract fun favoriteDao(): FavoriteDao
     abstract fun historyDao(): HistoryDao
+    abstract fun tmdbMatchCacheDao(): TmdbMatchCacheDao
 
     companion object {
         @Volatile

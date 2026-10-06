@@ -29,6 +29,7 @@ import { StorageService } from './services/storageService';
 import { PlaybackService } from './services/playbackService';
 import { parseM3U } from './services/m3uParser';
 import { XtreamClient } from './services/xtreamClient';
+import { evaluateSmartMatch } from './services/tmdbService';
 
 export default function App() {
   // Navigation
@@ -203,14 +204,48 @@ export default function App() {
   // Play a Movie
   const handlePlayMovie = (movie: MovieItem) => {
     setSelectedMovie(null); // close modal
-    const healedUrl = fixXtreamStreamUrl(movie.streamUrl);
+
+    let streamUrl = movie.streamUrl;
+    let finalMovie = movie;
+
+    // On-Demand Smart Match for Showcase/TMDb-only items
+    if (!streamUrl) {
+      console.log(`[On-Demand Match] Searching stream for: ${movie.name} (${movie.year})`);
+      let bestMovie: MovieItem | null = null;
+      let bestScore = 64; // minimum score threshold of 65/100 for a valid match
+
+      for (const m of movies) {
+        const res = evaluateSmartMatch(m.name, m.category, m.year, movie.name, undefined, movie.year);
+        if (res.isMatch && res.score > bestScore) {
+          bestScore = res.score;
+          bestMovie = m;
+          if (bestScore >= 98) break;
+        }
+      }
+
+      if (bestMovie) {
+        console.log(`[On-Demand Match] Found match: ${bestMovie.name} with score: ${bestScore}`);
+        streamUrl = bestMovie.streamUrl;
+        finalMovie = {
+          ...movie,
+          id: bestMovie.id,
+          streamUrl: bestMovie.streamUrl,
+          category: bestMovie.category || movie.category
+        };
+      } else {
+        showToast('Conteúdo não disponível no seu servidor IPTV', 'error');
+        return;
+      }
+    }
+
+    const healedUrl = fixXtreamStreamUrl(streamUrl);
 
     const historyItem: HistoryItem = {
       id: `hist_${Date.now()}`,
-      contentId: movie.id,
-      title: movie.name,
+      contentId: finalMovie.id,
+      title: finalMovie.name,
       type: 'movie',
-      posterUrl: movie.posterUrl,
+      posterUrl: finalMovie.posterUrl,
       playedAt: new Date().toISOString(),
       timestamp: Date.now(),
       streamUrl: healedUrl
@@ -220,10 +255,10 @@ export default function App() {
 
     setPlaybackDialog({
       isOpen: true,
-      title: movie.name,
+      title: finalMovie.name,
       streamUrl: healedUrl,
-      posterUrl: movie.posterUrl,
-      category: movie.category,
+      posterUrl: finalMovie.posterUrl,
+      category: finalMovie.category,
       type: 'movie'
     });
   };
@@ -629,6 +664,7 @@ export default function App() {
       {selectedSeries && (
         <SeriesDetailsModal
           series={selectedSeries}
+          localSeries={series}
           isFavorite={isFavorite(selectedSeries.id)}
           onClose={() => setSelectedSeries(null)}
           onPlayEpisode={handlePlayEpisode}

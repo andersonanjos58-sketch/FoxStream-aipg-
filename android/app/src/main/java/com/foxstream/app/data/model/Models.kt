@@ -144,3 +144,28 @@ data class HeroBannerItem(
     val seriesItem: SeriesItem? = null,
     val movieItem: MovieItem? = null
 )
+
+@Entity(
+    tableName = "tmdb_match_cache",
+    primaryKeys = ["playlistId", "localId", "categoryType"]
+)
+data class TmdbMatchCache(
+    val playlistId: String,
+    val localId: String,
+    val categoryType: String, // HERO_BANNER, TRENDING, POPULAR_MOVIES, POPULAR_SERIES, NOW_PLAYING
+    val tmdbId: Int? = null,
+    val title: String,
+    val posterUrl: String? = null,
+    val backdropUrl: String? = null,
+    val rating: String? = null,
+    val overview: String? = null,
+    val year: String? = null,
+    val genre: String? = null,
+    val streamUrl: String = "",
+    val badgeInfo: String? = null,
+    val contentType: ContentType = ContentType.MOVIE,
+    val extraJson: String? = null,
+    val matchScore: Int = 100,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+

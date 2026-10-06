@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -30,6 +31,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -252,16 +255,19 @@ fun HeroBannerCarousel(
     }
 
     val pagerState = rememberPagerState(pageCount = { items.size })
+    var isTouched by remember { mutableStateOf(false) }
 
     if (items.size > 1) {
-        LaunchedEffect(items.size, pagerState.isScrollInProgress) {
-            while (true) {
-                delay(6000L)
-                if (!pagerState.isScrollInProgress) {
-                    try {
-                        val next = (pagerState.currentPage + 1) % items.size
-                        pagerState.animateScrollToPage(next)
-                    } catch (_: Exception) {}
+        LaunchedEffect(pagerState.isScrollInProgress, isTouched, items.size) {
+            if (!pagerState.isScrollInProgress && !isTouched) {
+                while (true) {
+                    delay(3000L)
+                    if (!pagerState.isScrollInProgress && !isTouched) {
+                        try {
+                            val nextPage = (pagerState.currentPage + 1) % items.size
+                            pagerState.animateScrollToPage(nextPage)
+                        } catch (_: Exception) {}
+                    }
                 }
             }
         }
@@ -272,7 +278,15 @@ fun HeroBannerCarousel(
             state = pagerState,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(275.dp),
+                .height(275.dp)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            isTouched = event.changes.any { it.pressed }
+                        }
+                    }
+                },
             contentPadding = PaddingValues(horizontal = 16.dp),
             pageSpacing = 12.dp
         ) { page ->
@@ -325,38 +339,14 @@ fun HeroBannerCarousel(
                             )
                     )
 
-                    // Top pills: Destaque + Tipo
+                    // Top pill: Tipo
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = OrangePrimary
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "EM DESTAQUE",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                        }
-
                         Surface(
                             shape = RoundedCornerShape(20.dp),
                             color = Color.Black.copy(alpha = 0.65f)
@@ -398,19 +388,6 @@ fun HeroBannerCarousel(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-
-                        if (!item.overview.isNullOrBlank()) {
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = item.overview,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFD0D5DD),
-                                fontSize = 12.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                lineHeight = 16.sp
-                            )
-                        }
 
                         Spacer(modifier = Modifier.height(10.dp))
 
@@ -489,6 +466,10 @@ fun HomeScreen(
     channels: List<LiveChannel>,
     movies: List<MovieItem>,
     seriesList: List<SeriesItem>,
+    popularMovies: List<MovieItem> = emptyList(),
+    popularSeries: List<SeriesItem> = emptyList(),
+    newReleases: List<MovieItem> = emptyList(),
+    trendingMovies: List<MovieItem> = emptyList(),
     featuredBannerItems: List<HeroBannerItem> = emptyList(),
     isLoading: Boolean = false,
     onPlay: (String, String, ContentType) -> Unit,
@@ -553,6 +534,40 @@ fun HomeScreen(
         return
     }
 
+    // Extract all categories directly from local playlist items (0ms, independent of API)
+    val allCategories = remember(movies, seriesList, channels) {
+        val cats = mutableListOf<String>()
+        movies.forEach { m ->
+            val c = m.category.trim()
+            if (c.isNotBlank() && !c.equals("Filmes", ignoreCase = true) && !c.equals("Geral", ignoreCase = true)) {
+                cats.add(c)
+            }
+        }
+        seriesList.forEach { s ->
+            val c = s.category.trim()
+            if (c.isNotBlank() && !c.equals("Séries", ignoreCase = true) && !c.equals("Geral", ignoreCase = true)) {
+                cats.add(c)
+            }
+        }
+        channels.forEach { ch ->
+            val c = ch.category.trim()
+            if (c.isNotBlank() && !c.equals("Canais", ignoreCase = true) && !c.equals("Geral", ignoreCase = true)) {
+                cats.add(c)
+            }
+        }
+
+        val grouped = cats.groupingBy { it }.eachCount()
+        val sorted = grouped.entries.sortedByDescending { it.value }.map { it.key }
+        listOf("Todos") + sorted
+    }
+
+    var selectedCategory by remember { mutableStateOf("Todos") }
+
+    // Top populated categories for dedicated dynamic carousels
+    val topPlaylistCategories = remember(allCategories) {
+        allCategories.filter { it != "Todos" }.take(4)
+    }
+
     // Dynamic Hero Banner items: prioritizes TMDB matched content from user's active playlist
     val heroItems = remember(featuredBannerItems, movies, seriesList, channels) {
         if (featuredBannerItems.isNotEmpty()) {
@@ -561,12 +576,12 @@ fun HomeScreen(
             val list = mutableListOf<HeroBannerItem>()
 
             // Movies with posters
-            movies.filter { !it.posterUrl.isNullOrBlank() }.take(5).forEach { movie ->
+            movies.take(6).forEach { movie ->
                 list.add(
                     HeroBannerItem(
                         id = "movie_${movie.id}",
                         title = movie.name,
-                        imageUrl = movie.backdropUrl ?: movie.posterUrl!!,
+                        imageUrl = movie.backdropUrl ?: movie.posterUrl ?: "",
                         category = movie.category,
                         type = ContentType.MOVIE,
                         streamUrl = movie.streamUrl,
@@ -584,13 +599,13 @@ fun HomeScreen(
             }
 
             // Series with posters
-            seriesList.filter { !it.posterUrl.isNullOrBlank() }.take(4).forEach { s ->
+            seriesList.take(4).forEach { s ->
                 val firstEpUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: ""
                 list.add(
                     HeroBannerItem(
                         id = "series_${s.id}",
                         title = s.name,
-                        imageUrl = s.posterUrl!!,
+                        imageUrl = s.posterUrl ?: "",
                         category = s.category,
                         type = ContentType.SERIES,
                         streamUrl = firstEpUrl,
@@ -628,382 +643,654 @@ fun HomeScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 10.dp),
+        contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Seção Em Destaque
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "EM DESTAQUE",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = OrangePrimary
+        // 1. LINHA DE CATEGORIAS DA LISTA M3U (Pills Horizontais no topo)
+        if (allCategories.size > 1) {
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(allCategories) { cat ->
+                        val isSelected = (cat == selectedCategory) || (cat == "Todos" && selectedCategory == "Todos")
+                        Surface(
+                            onClick = {
+                                selectedCategory = if (selectedCategory == cat && cat != "Todos") "Todos" else cat
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) OrangePrimary else Color(0xFF1E222D),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.12f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (cat != "Todos") {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSelected) Color.White else OrangePrimary)
+                                    )
+                                }
+                                Text(
+                                    text = cat,
+                                    color = if (isSelected) Color.White else Color(0xFFD0D6E0),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Se uma categoria específica for selecionada no topo, exibe a exibição filtrada
+        if (selectedCategory != "Todos") {
+            val catMovies = movies.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+            val catSeries = seriesList.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+            val catChannels = channels.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+
+            if (catMovies.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "$selectedCategory (Filmes)",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.MOVIES) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    MoviesHorizontalCarousel(
+                        movies = catMovies,
+                        favorites = favorites,
+                        onPlay = onPlay,
+                        onOpenMovie = onOpenMovie,
+                        onToggleFavorite = onToggleFavoriteMovie
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(6.dp))
-            HeroBannerCarousel(
-                items = heroItems,
-                isLoading = isLoading,
-                onPlay = onPlay,
-                onOpenSeries = onOpenSeries,
-                onOpenMovie = onOpenMovie
-            )
-        }
 
-        // 2. Continue Assistindo (History)
-        if (history.isNotEmpty()) {
+            if (catSeries.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "$selectedCategory (Séries)",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.SERIES) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SeriesHorizontalCarousel(
+                        seriesList = catSeries,
+                        onOpenSeries = onOpenSeries
+                    )
+                }
+            }
+
+            if (catChannels.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "$selectedCategory (Canais)",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.LIVE) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LiveChannelsHorizontalCarousel(
+                        channels = catChannels,
+                        favorites = favorites,
+                        onPlay = onPlay,
+                        onToggleFavorite = onToggleFavoriteChannel
+                    )
+                }
+            }
+        } else {
+            // MODO PADRÃO HOME: Todos os carrosséis completos
+
+            // 2. Destaques (Hero Banner Carousel)
             item {
-                val continueCardWidth = (LocalConfiguration.current.screenWidthDp.dp * 0.47f).coerceIn(155.dp, 215.dp)
-                var selectedContinueWatchingId by remember { mutableStateOf<String?>(null) }
-                Spacer(modifier = Modifier.height(2.dp))
-                SectionHeader("Continue Assistindo")
-                Spacer(modifier = Modifier.height(4.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(history, key = { it.id }) { item ->
-                        val isSelected = selectedContinueWatchingId == item.id
-                        val fallbackPoster = when (item.type) {
-                            ContentType.MOVIE -> movies.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.posterUrl
-                            ContentType.SERIES -> {
-                                val sName = item.seriesName ?: item.title.substringBefore(" - ").trim()
-                                seriesList.find { it.name.equals(sName, ignoreCase = true) }?.posterUrl
+                    Text(
+                        text = "EM DESTAQUE",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = OrangePrimary
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                HeroBannerCarousel(
+                    items = heroItems,
+                    isLoading = isLoading,
+                    onPlay = onPlay,
+                    onOpenSeries = onOpenSeries,
+                    onOpenMovie = onOpenMovie
+                )
+            }
+
+            // 3. Continue Assistindo (History)
+            if (history.isNotEmpty()) {
+                item {
+                    val continueCardWidth = (LocalConfiguration.current.screenWidthDp.dp * 0.47f).coerceIn(155.dp, 215.dp)
+                    var selectedContinueWatchingId by remember { mutableStateOf<String?>(null) }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    SectionHeader("Continue Assistindo")
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(history, key = { it.id }) { item ->
+                            val isSelected = selectedContinueWatchingId == item.id
+                            val fallbackPoster = when (item.type) {
+                                ContentType.MOVIE -> movies.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.posterUrl
+                                ContentType.SERIES -> {
+                                    val sName = item.seriesName ?: item.title.substringBefore(" - ").trim()
+                                    seriesList.find { it.name.equals(sName, ignoreCase = true) }?.posterUrl
+                                }
+                                ContentType.LIVE -> channels.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.logoUrl
                             }
-                            ContentType.LIVE -> channels.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.logoUrl
-                        }
-                        val posterToUse = item.posterUrl ?: fallbackPoster
-                        val placeholderIcon = when (item.type) {
-                            ContentType.LIVE -> Icons.Default.Tv
-                            ContentType.MOVIE -> Icons.Default.Movie
-                            ContentType.SERIES -> Icons.Default.LiveTv
-                        }
-                        Surface(
-                            modifier = Modifier
-                                .width(continueCardWidth)
-                                .combinedClickable(
-                                    onClick = {
-                                        if (selectedContinueWatchingId == item.id) {
-                                            selectedContinueWatchingId = null
-                                        } else {
-                                            onPlay(item.streamUrl, item.title, item.type)
+                            val posterToUse = item.posterUrl ?: fallbackPoster
+                            val placeholderIcon = when (item.type) {
+                                ContentType.LIVE -> Icons.Default.Tv
+                                ContentType.MOVIE -> Icons.Default.Movie
+                                ContentType.SERIES -> Icons.Default.LiveTv
+                            }
+                            Surface(
+                                modifier = Modifier
+                                    .width(continueCardWidth)
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (selectedContinueWatchingId == item.id) {
+                                                selectedContinueWatchingId = null
+                                            } else {
+                                                onPlay(item.streamUrl, item.title, item.type)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            selectedContinueWatchingId = item.id
                                         }
-                                    },
-                                    onLongClick = {
-                                        selectedContinueWatchingId = item.id
-                                    }
-                                ),
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            tonalElevation = 1.dp
-                        ) {
-                            Box {
-                                Column {
-                                // Thumbnail com imagem/poster/logo e overlay
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(16f / 9.5f)
-                                        .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
-                                ) {
-                                    CoilPosterImage(
-                                        url = posterToUse,
-                                        placeholderIcon = placeholderIcon,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    // Gradiente suave escuro
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(
-                                                Brush.verticalGradient(
-                                                    colors = listOf(
-                                                        Color.Black.copy(alpha = 0.15f),
-                                                        Color.Black.copy(alpha = 0.65f)
-                                                    )
-                                                )
+                                    ),
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                tonalElevation = 1.dp
+                            ) {
+                                Box {
+                                    Column {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(16f / 9.5f)
+                                                .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+                                        ) {
+                                            CoilPosterImage(
+                                                url = posterToUse,
+                                                placeholderIcon = placeholderIcon,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
                                             )
-                                    )
-                                    // Badge de Tipo ("FILME", "SÉRIE", "LIVE")
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = if (item.type == ContentType.LIVE) Color(0xFFE50914) else Color.Black.copy(alpha = 0.75f),
-                                        modifier = Modifier
-                                            .padding(6.dp)
-                                            .align(Alignment.TopStart)
-                                    ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(
+                                                        Brush.verticalGradient(
+                                                            colors = listOf(
+                                                                Color.Black.copy(alpha = 0.15f),
+                                                                Color.Black.copy(alpha = 0.65f)
+                                                            )
+                                                        )
+                                                    )
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = if (item.type == ContentType.LIVE) Color(0xFFE50914) else Color.Black.copy(alpha = 0.75f),
+                                                modifier = Modifier
+                                                    .padding(6.dp)
+                                                    .align(Alignment.TopStart)
+                                            ) {
+                                                Text(
+                                                    text = when (item.type) {
+                                                        ContentType.LIVE -> "LIVE"
+                                                        ContentType.MOVIE -> "FILME"
+                                                        ContentType.SERIES -> "SÉRIE"
+                                                    },
+                                                    color = Color.White,
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = 0.5.sp,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = Color.Black.copy(alpha = 0.55f),
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .align(Alignment.Center)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.PlayArrow,
+                                                        contentDescription = null,
+                                                        tint = OrangePrimary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            if (item.type != ContentType.LIVE && item.duration > 0L) {
+                                                val progress = (item.playbackPosition.toFloat() / item.duration.toFloat()).coerceIn(0f, 1f)
+                                                if (progress > 0.01f) {
+                                                    LinearProgressIndicator(
+                                                        progress = progress,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(2.5.dp)
+                                                            .align(Alignment.BottomCenter),
+                                                        color = OrangePrimary,
+                                                        trackColor = Color(0x66000000)
+                                                    )
+                                                }
+                                            }
+                                        }
                                         Text(
-                                            text = when (item.type) {
-                                                ContentType.LIVE -> "LIVE"
-                                                ContentType.MOVIE -> "FILME"
-                                                ContentType.SERIES -> "SÉRIE"
-                                            },
+                                            text = item.title,
+                                            fontWeight = FontWeight.SemiBold,
                                             color = Color.White,
-                                            fontSize = 8.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.5.sp,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            fontSize = 11.5.sp,
+                                            lineHeight = 15.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                                         )
                                     }
-                                    // Overlay com botão de play sutil no centro
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = Color.Black.copy(alpha = 0.55f),
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .align(Alignment.Center)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = OrangePrimary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                    // Barra laranja de progresso na parte inferior da imagem quando houver progresso
-                                    if (item.type != ContentType.LIVE && item.duration > 0L) {
-                                        val progress = (item.playbackPosition.toFloat() / item.duration.toFloat()).coerceIn(0f, 1f)
-                                        if (progress > 0.01f) {
-                                            LinearProgressIndicator(
-                                                progress = progress,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(2.5.dp)
-                                                    .align(Alignment.BottomCenter),
-                                                color = OrangePrimary,
-                                                trackColor = Color(0x66000000)
-                                            )
-                                        }
-                                    }
 
-                                }
-                                // Nome do conteúdo abaixo da imagem (no máximo 2 linhas com reticências)
-                                Text(
-                                    text = item.title,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White,
-                                    fontSize = 11.5.sp,
-                                    lineHeight = 15.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                                )
-                            }
-
-                            if (isSelected) {
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .background(Color.Black.copy(alpha = 0.85f))
-                                        .clickable { selectedContinueWatchingId = null }
-                                        .padding(8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Button(
-                                            onClick = {
-                                                selectedContinueWatchingId = null
-                                                onPlay(item.streamUrl, item.title, item.type)
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.fillMaxWidth().height(30.dp),
-                                            shape = RoundedCornerShape(6.dp)
+                                    if (isSelected) {
+                                        Box(
+                                            modifier = Modifier
+                                                .matchParentSize()
+                                                .background(Color.Black.copy(alpha = 0.85f))
+                                                .clickable { selectedContinueWatchingId = null }
+                                                .padding(8.dp),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(3.dp))
-                                            Text("Continuar", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                        }
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Button(
+                                                    onClick = {
+                                                        selectedContinueWatchingId = null
+                                                        onPlay(item.streamUrl, item.title, item.type)
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    modifier = Modifier.fillMaxWidth().height(30.dp),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.PlayArrow,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(13.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text("Continuar", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
 
-                                        Button(
-                                            onClick = {
-                                                selectedContinueWatchingId = null
-                                                onRemoveHistory(item)
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray.copy(alpha = 0.9f)),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.fillMaxWidth().height(30.dp),
-                                            shape = RoundedCornerShape(6.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Delete,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(3.dp))
-                                            Text("Excluir", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Button(
+                                                    onClick = {
+                                                        selectedContinueWatchingId = null
+                                                        onRemoveHistory(item)
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray.copy(alpha = 0.9f)),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    modifier = Modifier.fillMaxWidth().height(30.dp),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(13.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text("Excluir", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+
+            // 4. Favoritos
+            if (favorites.isNotEmpty()) {
+                item {
+                    SectionHeader("Favoritos")
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(favorites) { item ->
+                            Surface(
+                                modifier = Modifier
+                                    .width(140.dp)
+                                    .clickable { item.streamUrl?.let { onPlay(it, item.title, item.type) } },
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    CoilPosterImage(
+                                        url = item.posterUrl,
+                                        placeholderIcon = Icons.Default.Favorite,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(110.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(item.title, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
+                                    Text(item.category, fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Filmes (Lista Principal M3U / Xtream)
+            if (movies.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "Filmes",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.MOVIES) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    MoviesHorizontalCarousel(
+                        movies = movies,
+                        favorites = favorites,
+                        onPlay = onPlay,
+                        onOpenMovie = onOpenMovie,
+                        onToggleFavorite = onToggleFavoriteMovie
+                    )
+                }
+            }
+
+            // 6. Séries (Lista Principal M3U / Xtream)
+            if (seriesList.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "Séries",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.SERIES) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SeriesHorizontalCarousel(
+                        seriesList = seriesList,
+                        onOpenSeries = onOpenSeries
+                    )
+                }
+            }
+
+            // 7. Filmes Populares
+            if (popularMovies.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "Filmes populares",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.MOVIES) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    MoviesHorizontalCarousel(
+                        movies = popularMovies,
+                        favorites = favorites,
+                        onPlay = onPlay,
+                        onOpenMovie = onOpenMovie,
+                        onToggleFavorite = onToggleFavoriteMovie
+                    )
+                }
+            }
+
+            // 8. Séries Populares
+            if (popularSeries.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "Séries populares",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.SERIES) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    SeriesHorizontalCarousel(
+                        seriesList = popularSeries,
+                        onOpenSeries = onOpenSeries
+                    )
+                }
+            }
+
+            // 9. Lançamentos
+            if (newReleases.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "Lançamentos",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.MOVIES) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    MoviesHorizontalCarousel(
+                        movies = newReleases,
+                        favorites = favorites,
+                        onPlay = onPlay,
+                        onOpenMovie = onOpenMovie,
+                        onToggleFavorite = onToggleFavoriteMovie
+                    )
+                }
+            }
+
+            // 11. Carrosséis Dinâmicos por Categorias Populares da Lista
+            topPlaylistCategories.forEach { catName ->
+                val catMovies = movies.filter { it.category.equals(catName, ignoreCase = true) }
+                val catSeries = seriesList.filter { it.category.equals(catName, ignoreCase = true) }
+
+                if (catMovies.isNotEmpty()) {
+                    item {
+                        SectionHeaderWithAction(
+                            title = catName,
+                            actionText = "Ver todos",
+                            onAction = { onNavigate(AppNavTab.MOVIES) }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        MoviesHorizontalCarousel(
+                            movies = catMovies,
+                            favorites = favorites,
+                            onPlay = onPlay,
+                            onOpenMovie = onOpenMovie,
+                            onToggleFavorite = onToggleFavoriteMovie
+                        )
+                    }
+                } else if (catSeries.isNotEmpty()) {
+                    item {
+                        SectionHeaderWithAction(
+                            title = catName,
+                            actionText = "Ver todos",
+                            onAction = { onNavigate(AppNavTab.SERIES) }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        SeriesHorizontalCarousel(
+                            seriesList = catSeries,
+                            onOpenSeries = onOpenSeries
+                        )
+                    }
+                }
+            }
+
+            // 12. TV ao Vivo
+            if (channels.isNotEmpty()) {
+                item {
+                    SectionHeaderWithAction(
+                        title = "TV ao Vivo",
+                        actionText = "Ver todos",
+                        onAction = { onNavigate(AppNavTab.LIVE) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LiveChannelsHorizontalCarousel(
+                        channels = channels,
+                        favorites = favorites,
+                        onPlay = onPlay,
+                        onToggleFavorite = onToggleFavoriteChannel
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LiveChannelsHorizontalCarousel(
+    channels: List<LiveChannel>,
+    favorites: List<FavoriteItem>,
+    onPlay: (String, String, ContentType) -> Unit,
+    onLoadMore: (() -> Unit)? = null,
+    onToggleFavorite: (LiveChannel) -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 4
         }
     }
 
-        // 3. Favoritos
-        if (favorites.isNotEmpty()) {
-            item {
-                SectionHeader("Favoritos")
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(favorites) { item ->
-                        Surface(
-                            modifier = Modifier
-                                .width(140.dp)
-                                .clickable { item.streamUrl?.let { onPlay(it, item.title, item.type) } },
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surface
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                CoilPosterImage(
-                                    url = item.posterUrl,
-                                    placeholderIcon = Icons.Default.Favorite,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(110.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(item.title, fontWeight = FontWeight.SemiBold, color = Color.White, maxLines = 1)
-                                Text(item.category, fontSize = 10.sp, color = Color.Gray)
-                            }
-                        }
-                    }
-                }
-            }
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value && onLoadMore != null) {
+            onLoadMore()
         }
+    }
 
-        // 4. TV ao Vivo (3 canais por linha + "Ver todos")
-        if (channels.isNotEmpty()) {
-            item {
-                SectionHeaderWithAction(
-                    title = "TV ao Vivo",
-                    onAction = { onNavigate(AppNavTab.LIVE) }
+    LazyRow(
+        state = listState,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        items(channels, key = { it.id }) { channel ->
+            val isFav = channel.isFavorite || favorites.any { it.contentId == channel.id }
+            Box(modifier = Modifier.width(175.dp)) {
+                LiveChannelGridCard(
+                    channel = channel,
+                    isFavorite = isFav,
+                    onPlay = onPlay,
+                    onToggleFavorite = onToggleFavorite
                 )
             }
-            val previewChannels = channels.take(6)
-            items(previewChannels.chunked(3)) { rowItems ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    rowItems.forEach { channel ->
-                        val isFav = channel.isFavorite || favorites.any { it.contentId == channel.id }
-                        Box(modifier = Modifier.weight(1f)) {
-                            LiveChannelGridCard(
-                                channel = channel,
-                                isFavorite = isFav,
-                                onPlay = onPlay,
-                                onToggleFavorite = onToggleFavoriteChannel
-                            )
-                        }
-                    }
-                    repeat(3 - rowItems.size) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
         }
+    }
+}
 
-        // 5. Filmes (3 filmes por linha + "Ver todos")
-        if (movies.isNotEmpty()) {
-            item {
-                SectionHeaderWithAction(
-                    title = "Filmes",
-                    onAction = { onNavigate(AppNavTab.MOVIES) }
+@Composable
+fun MoviesHorizontalCarousel(
+    movies: List<MovieItem>,
+    favorites: List<FavoriteItem>,
+    onPlay: (String, String, ContentType) -> Unit,
+    onOpenMovie: (MovieItem) -> Unit,
+    onLoadMore: (() -> Unit)? = null,
+    onToggleFavorite: (MovieItem) -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 4
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value && onLoadMore != null) {
+            onLoadMore()
+        }
+    }
+
+    LazyRow(
+        state = listState,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        items(movies, key = { it.id }) { movie ->
+            val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
+            Box(modifier = Modifier.width(135.dp)) {
+                MovieGridCard(
+                    movie = movie,
+                    isFavorite = isFav,
+                    onPlay = onPlay,
+                    onOpenMovie = onOpenMovie,
+                    onToggleFavorite = onToggleFavorite
                 )
             }
-            val previewMovies = movies.take(6)
-            items(previewMovies.chunked(3)) { rowItems ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    rowItems.forEach { movie ->
-                        val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
-                        Box(modifier = Modifier.weight(1f)) {
-                            MovieGridCard(
-                                movie = movie,
-                                isFavorite = isFav,
-                                onPlay = onPlay,
-                                onOpenMovie = onOpenMovie,
-                                onToggleFavorite = onToggleFavoriteMovie
-                            )
-                        }
-                    }
-                    repeat(3 - rowItems.size) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
         }
+    }
+}
 
-        // 6. Séries (3 séries por linha + "Ver todos")
-        if (seriesList.isNotEmpty()) {
-            item {
-                SectionHeaderWithAction(
-                    title = "Séries",
-                    onAction = { onNavigate(AppNavTab.SERIES) }
+@Composable
+fun SeriesHorizontalCarousel(
+    seriesList: List<SeriesItem>,
+    onLoadMore: (() -> Unit)? = null,
+    onOpenSeries: (SeriesItem) -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 4
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value && onLoadMore != null) {
+            onLoadMore()
+        }
+    }
+
+    LazyRow(
+        state = listState,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        items(seriesList, key = { it.id }) { s ->
+            Box(modifier = Modifier.width(135.dp)) {
+                SeriesGridCard(
+                    series = s,
+                    onSelect = { onOpenSeries(s) }
                 )
-            }
-            val previewSeries = seriesList.take(6)
-            items(previewSeries.chunked(3)) { rowItems ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    rowItems.forEach { s ->
-                        Box(modifier = Modifier.weight(1f)) {
-                            SeriesGridCard(
-                                series = s,
-                                onSelect = { onOpenSeries(s) }
-                            )
-                        }
-                    }
-                    repeat(3 - rowItems.size) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
             }
         }
     }

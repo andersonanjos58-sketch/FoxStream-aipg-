@@ -1,6 +1,7 @@
-import React from 'react';
-import { X, Play, Heart, Film, Calendar, Star, Clock, Copy, ExternalLink, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Play, Heart, Film, Calendar, Star, Clock, Copy, ExternalLink, Check, Sparkles } from 'lucide-react';
 import { MovieItem } from '../types';
+import { TmdbService, TmdbData } from '../services/tmdbService';
 
 interface MovieDetailsModalProps {
   movie: MovieItem | null;
@@ -17,9 +18,45 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
   onPlay,
   onToggleFavorite
 }) => {
-  const [copied, setCopied] = React.useState(false);
+  const [copied, setCopied] = useState(false);
+  const [tmdbData, setTmdbData] = useState<TmdbData | null>(null);
+  const [isLoadingTmdb, setIsLoadingTmdb] = useState(true);
+
+  useEffect(() => {
+    if (!movie) {
+      setTmdbData(null);
+      setIsLoadingTmdb(false);
+      return;
+    }
+
+    // 1. Instant local display
+    setIsLoadingTmdb(true);
+    setTmdbData(null);
+
+    // 2. Non-blocking background fetch to TMDb
+    let isMounted = true;
+    TmdbService.fetchMovieDetails(movie.name, movie.year)
+      .then(data => {
+        if (isMounted) {
+          setTmdbData(data);
+          setIsLoadingTmdb(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsLoadingTmdb(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [movie]);
 
   if (!movie) return null;
+
+  const backdrop = tmdbData?.backdrop || movie.backdropUrl || movie.posterUrl;
+  const rating = tmdbData?.rating || movie.rating;
+  const year = tmdbData?.year || movie.year;
+  const plot = tmdbData?.plot || movie.description || 'Pressione o botão Assistir para reproduzir este filme no seu player.';
 
   const handleCopyLink = () => {
     if (navigator?.clipboard?.writeText) {
@@ -52,12 +89,12 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
 
         {/* Backdrop Banner / Poster Top Section */}
         <div className="relative h-48 sm:h-64 w-full bg-gradient-to-t from-[#11131b] via-neutral-900/60 to-black/80 overflow-hidden shrink-0">
-          {movie.posterUrl ? (
+          {backdrop ? (
             <img
-              src={movie.posterUrl}
+              src={backdrop}
               alt={movie.name}
               referrerPolicy="no-referrer"
-              className="w-full h-full object-cover blur-md opacity-30 scale-110"
+              className="w-full h-full object-cover blur-sm opacity-40 scale-105"
               onError={(e) => {
                 (e.target as HTMLElement).style.display = 'none';
               }}
@@ -101,16 +138,16 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
         <div className="p-6 sm:p-8 overflow-y-auto space-y-6">
           {/* Metadata Badges */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-neutral-300">
-            {movie.year && (
+            {year && (
               <span className="flex items-center gap-1 bg-neutral-900 px-2.5 py-1 rounded-lg border border-neutral-800 font-medium">
                 <Calendar className="w-3.5 h-3.5 text-orange-400" />
-                {movie.year}
+                {year}
               </span>
             )}
-            {movie.rating && (
+            {rating && (
               <span className="flex items-center gap-1 bg-neutral-900 px-2.5 py-1 rounded-lg border border-neutral-800 font-medium text-amber-300">
                 <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                {movie.rating}
+                {rating}
               </span>
             )}
             {movie.duration && (
@@ -126,12 +163,16 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
 
           {/* Synopsis */}
           <div>
-            <h3 className="text-sm font-semibold text-neutral-300 mb-2 uppercase tracking-wide text-[11px]">
-              Sinopse
+            <h3 className="text-sm font-semibold text-neutral-300 mb-2 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
+              <span>Sinopse</span>
+              {isLoadingTmdb ? (
+                <span className="text-[10px] font-normal text-neutral-500 animate-pulse">(Buscando TMDb...)</span>
+              ) : tmdbData ? (
+                <Sparkles className="w-3 h-3 text-orange-400" />
+              ) : null}
             </h3>
-            <p className="text-sm text-neutral-400 leading-relaxed font-light">
-              {movie.description ||
-                'Nenhuma descrição disponível nos metadados da playlist. Pressione o botão Assistir para reproduzir este filme no seu reprodutor externo padrão ou VLC.'}
+            <p className="text-sm text-neutral-300 leading-relaxed font-light">
+              {plot}
             </p>
           </div>
 

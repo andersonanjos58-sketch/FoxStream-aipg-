@@ -1,9 +1,11 @@
 import React, { useRef, useState } from 'react';
 import { 
   Play, Tv, Film, Clapperboard, Heart, Clock, ChevronRight, 
-  ChevronLeft, Plus, Sparkles, Star, Calendar, ArrowRight, Trash2
+  ChevronLeft, Plus, Sparkles, Star, Calendar, ArrowRight, Trash2,
+  Flame, TrendingUp, Rocket
 } from 'lucide-react';
 import { LiveChannel, MovieItem, SeriesItem, HistoryItem, FavoriteItem, Playlist } from '../types';
+import { TmdbService, evaluateSmartMatch, cleanTitleForTmdb } from '../services/tmdbService';
 
 interface HomeScreenProps {
   activePlaylist: Playlist | null;
@@ -37,6 +39,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenAddPlaylist,
 }) => {
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
+  const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
 
   // Carousel scroll helpers
   const scrollRef = (element: HTMLDivElement | null, distance: number) => {
@@ -50,6 +55,306 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const liveRef = useRef<HTMLDivElement>(null);
   const moviesRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<HTMLDivElement>(null);
+  const trendingRef = useRef<HTMLDivElement>(null);
+  const popMoviesRef = useRef<HTMLDivElement>(null);
+  const popSeriesRef = useRef<HTMLDivElement>(null);
+  const newReleasesRef = useRef<HTMLDivElement>(null);
+
+  // TMDb Category Carousels State with instant localStorage persistence
+  const cacheKey = activePlaylist ? `foxstream_home_cache_${activePlaylist.id}` : null;
+  const initialCache = React.useMemo(() => {
+    if (!cacheKey) return null;
+    try {
+      const saved = localStorage.getItem(cacheKey);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, [cacheKey]);
+
+  const [trendingItems, setTrendingItems] = useState<(MovieItem | SeriesItem)[]>(() => {
+    if (initialCache?.trending?.length) return initialCache.trending;
+    return [...movies.slice(0, 10), ...series.slice(0, 10)];
+  });
+  const [popularMoviesList, setPopularMoviesList] = useState<MovieItem[]>(() => {
+    if (initialCache?.popularMovies?.length) return initialCache.popularMovies;
+    return movies.slice(0, 15);
+  });
+  const [popularSeriesList, setPopularSeriesList] = useState<SeriesItem[]>(() => {
+    if (initialCache?.popularSeries?.length) return initialCache.popularSeries;
+    return series.slice(0, 15);
+  });
+  const [newReleasesList, setNewReleasesList] = useState<(MovieItem | SeriesItem)[]>(() => {
+    if (initialCache?.newReleases?.length) return initialCache.newReleases;
+    const currentYear = new Date().getFullYear().toString();
+    const prevYear = (new Date().getFullYear() - 1).toString();
+    const localReleases = [
+      ...movies.filter(m => m.year === currentYear || m.year === prevYear),
+      ...series.filter(s => s.year === currentYear || s.year === prevYear)
+    ];
+    const lastAdded = [...movies.slice(-15), ...series.slice(-15)];
+    const combined: (MovieItem | SeriesItem)[] = [];
+    const seen = new Set<string>();
+    localReleases.forEach(item => {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        combined.push(item);
+      }
+    });
+    lastAdded.forEach(item => {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        combined.push(item);
+      }
+    });
+    return combined.slice(0, 20);
+  });
+
+  // Dynamic category pills extracted directly from playlist items (0ms)
+  const allCategories = React.useMemo(() => {
+    const cats: string[] = [];
+    movies.forEach(m => {
+      const c = m.category?.trim();
+      if (c && c.toLowerCase() !== 'filmes' && c.toLowerCase() !== 'geral') cats.push(c);
+    });
+    series.forEach(s => {
+      const c = s.category?.trim();
+      if (c && c.toLowerCase() !== 'séries' && c.toLowerCase() !== 'geral') cats.push(c);
+    });
+    channels.forEach(ch => {
+      const c = ch.category?.trim();
+      if (c && c.toLowerCase() !== 'canais' && c.toLowerCase() !== 'geral') cats.push(c);
+    });
+
+    const frequency: Record<string, number> = {};
+    cats.forEach(c => { frequency[c] = (frequency[c] || 0) + 1; });
+    const sorted = Object.keys(frequency).sort((a, b) => frequency[b] - frequency[a]);
+    return ['Todos', ...sorted];
+  }, [movies, series, channels]);
+
+  // Featured List (carrossel de destaques)
+  const featuredList = React.useMemo(() => {
+    const list = trendingItems.length > 0 ? trendingItems : [...movies.slice(0, 5), ...series.slice(0, 5)];
+    return list.slice(0, 8);
+  }, [trendingItems, movies, series]);
+
+  // Hydrate instantly when playlist changes
+  React.useEffect(() => {
+    if (initialCache) {
+      if (initialCache.trending?.length) setTrendingItems(initialCache.trending);
+      if (initialCache.popularMovies?.length) setPopularMoviesList(initialCache.popularMovies);
+      if (initialCache.popularSeries?.length) setPopularSeriesList(initialCache.popularSeries);
+      if (initialCache.newReleases?.length) setNewReleasesList(initialCache.newReleases);
+    } else {
+      setTrendingItems([...movies.slice(0, 10), ...series.slice(0, 10)]);
+      setPopularMoviesList(movies.slice(0, 15));
+      setPopularSeriesList(series.slice(0, 15));
+      const currentYear = new Date().getFullYear().toString();
+      const prevYear = (new Date().getFullYear() - 1).toString();
+      const localReleases = [
+        ...movies.filter(m => m.year === currentYear || m.year === prevYear),
+        ...series.filter(s => s.year === currentYear || s.year === prevYear)
+      ];
+      const lastAdded = [...movies.slice(-15), ...series.slice(-15)];
+      const combined: (MovieItem | SeriesItem)[] = [];
+      const seen = new Set<string>();
+      localReleases.forEach(item => {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          combined.push(item);
+        }
+      });
+      lastAdded.forEach(item => {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          combined.push(item);
+        }
+      });
+      setNewReleasesList(combined.slice(0, 20));
+    }
+  }, [initialCache, movies, series]);
+
+  React.useEffect(() => {
+    if (featuredList.length <= 1 || isPaused) return;
+
+    const timer = setInterval(() => {
+      setCurrentFeaturedIndex(prev => (prev + 1) % featuredList.length);
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [featuredList.length, isPaused]);
+
+  React.useEffect(() => {
+    let isCancelled = false;
+
+    const loadTmdbCategories = async () => {
+      try {
+        // Fetch all TMDb endpoints in PARALLEL safely (~0.5s)
+        const [trendM, trendTv, popM, popTv, nowPlaying, airingTv] = await Promise.all([
+          TmdbService.fetchTrendingMovies().catch(() => []),
+          TmdbService.fetchTrendingTv().catch(() => []),
+          TmdbService.fetchPopularMovies().catch(() => []),
+          TmdbService.fetchPopularTv().catch(() => []),
+          TmdbService.fetchNowPlayingMovies().catch(() => []),
+          TmdbService.fetchCategoryList('tv/on_the_air', true).catch(() => [])
+        ]);
+        if (isCancelled) return;
+
+        // 1. Destaques (Trending Movies & Series used for Highlights banner)
+        const matchedTrending: (MovieItem | SeriesItem)[] = [];
+        trendM.forEach(tmdb => {
+          matchedTrending.push({
+            id: `tmdb_trending_m_${tmdb.tmdbId}`,
+            playlistId: '',
+            name: tmdb.title || '',
+            posterUrl: tmdb.poster,
+            backdropUrl: tmdb.backdrop,
+            category: 'TMDb',
+            year: tmdb.year,
+            rating: tmdb.rating,
+            description: tmdb.plot
+          } as any);
+        });
+        trendTv.forEach(tmdb => {
+          matchedTrending.push({
+            id: `tmdb_trending_s_${tmdb.tmdbId}`,
+            playlistId: '',
+            name: tmdb.title || '',
+            posterUrl: tmdb.poster,
+            backdropUrl: tmdb.backdrop,
+            category: 'TMDb',
+            year: tmdb.year,
+            rating: tmdb.rating,
+            description: tmdb.plot,
+            seasons: []
+          } as any);
+        });
+        const finalTrending = matchedTrending.length >= 3 
+          ? matchedTrending.slice(0, 15) 
+          : [...movies.slice(0, 8), ...series.slice(0, 8)];
+        setTrendingItems(finalTrending);
+
+        // 2. Filmes Populares (Popular Movies)
+        const matchedPopM: MovieItem[] = [];
+        popM.forEach(tmdb => {
+          matchedPopM.push({
+            id: `tmdb_movie_${tmdb.tmdbId}`,
+            playlistId: '',
+            name: tmdb.title || '',
+            streamUrl: '',
+            posterUrl: tmdb.poster,
+            backdropUrl: tmdb.backdrop,
+            category: 'TMDb',
+            year: tmdb.year,
+            rating: tmdb.rating,
+            description: tmdb.plot
+          });
+        });
+        const finalPopM = matchedPopM.length >= 3 ? matchedPopM.slice(0, 15) : movies.slice(0, 15);
+        setPopularMoviesList(finalPopM);
+
+        // 3. Séries Populares (Popular TV)
+        const matchedPopTv: SeriesItem[] = [];
+        popTv.forEach(tmdb => {
+          matchedPopTv.push({
+            id: `tmdb_series_${tmdb.tmdbId}`,
+            playlistId: '',
+            name: tmdb.title || '',
+            posterUrl: tmdb.poster,
+            backdropUrl: tmdb.backdrop,
+            category: 'TMDb',
+            year: tmdb.year,
+            rating: tmdb.rating,
+            description: tmdb.plot,
+            seasons: []
+          });
+        });
+        const finalPopTv = matchedPopTv.length >= 3 ? matchedPopTv.slice(0, 15) : series.slice(0, 15);
+        setPopularSeriesList(finalPopTv);
+
+        // 4. Lançamentos (Now Playing Movies & Airing Series)
+        const matchedReleases: (MovieItem | SeriesItem)[] = [];
+        nowPlaying.forEach(tmdb => {
+          matchedReleases.push({
+            id: `tmdb_release_m_${tmdb.tmdbId}`,
+            playlistId: '',
+            name: tmdb.title || '',
+            streamUrl: '',
+            posterUrl: tmdb.poster,
+            backdropUrl: tmdb.backdrop,
+            category: 'TMDb',
+            year: tmdb.year,
+            rating: tmdb.rating,
+            description: tmdb.plot
+          } as any);
+        });
+        airingTv.forEach(tmdb => {
+          matchedReleases.push({
+            id: `tmdb_release_s_${tmdb.tmdbId}`,
+            playlistId: '',
+            name: tmdb.title || '',
+            posterUrl: tmdb.poster,
+            backdropUrl: tmdb.backdrop,
+            category: 'TMDb',
+            year: tmdb.year,
+            rating: tmdb.rating,
+            description: tmdb.plot,
+            seasons: []
+          } as any);
+        });
+
+        const currentYear = new Date().getFullYear().toString();
+        const prevYear = (new Date().getFullYear() - 1).toString();
+        const localReleases = [
+          ...movies.filter(m => m.year === currentYear || m.year === prevYear),
+          ...series.filter(s => s.year === currentYear || s.year === prevYear)
+        ];
+        const lastAdded = [...movies.slice(-15), ...series.slice(-15)];
+        const combinedFallback: (MovieItem | SeriesItem)[] = [];
+        const seen = new Set<string>();
+        localReleases.forEach(item => {
+          if (!seen.has(item.id)) {
+            seen.add(item.id);
+            combinedFallback.push(item);
+          }
+        });
+        lastAdded.forEach(item => {
+          if (!seen.has(item.id)) {
+            seen.add(item.id);
+            combinedFallback.push(item);
+          }
+        });
+
+        const finalReleases = matchedReleases.length >= 3 
+          ? matchedReleases.slice(0, 20) 
+          : combinedFallback.slice(0, 20);
+        setNewReleasesList(finalReleases);
+
+        // Save into persistent local storage cache for instant opening next time
+        if (cacheKey) {
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify({
+              trending: finalTrending,
+              popularMovies: finalPopM,
+              popularSeries: finalPopTv,
+              newReleases: finalReleases,
+              timestamp: Date.now()
+            }));
+          } catch (e) {
+            console.warn('LocalStorage save failed:', e);
+          }
+        }
+      } catch (err) {
+        console.warn('Error loading TMDb categories:', err);
+      }
+    };
+
+    loadTmdbCategories();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [movies, series, cacheKey]);
 
   // If no playlist is loaded, show welcoming setup hero
   if (!activePlaylist) {
@@ -115,21 +420,55 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     );
   }
 
-  // Active playlist preview hero banner
-  const featuredMovie = movies[0];
+  const currentFeatured = featuredList[currentFeaturedIndex] || movies[0];
 
   return (
-    <div className="space-y-8 pb-24 overflow-x-hidden animate-in fade-in duration-300">
-      {/* Featured Header Banner if movie or series exists */}
-      {featuredMovie && (
-        <section className="relative h-64 sm:h-80 md:h-96 w-full overflow-hidden">
+    <div className="space-y-6 pb-24 overflow-x-hidden animate-in fade-in duration-300">
+      {/* Dynamic Category Pills Row (from M3U playlist) */}
+      {allCategories.length > 1 && (
+        <div className="px-4 max-w-7xl mx-auto pt-2">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+            {allCategories.map(cat => {
+              const isSelected = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSelectedCategory(selectedCategory === cat && cat !== 'Todos' ? 'Todos' : cat)}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-orange-500 text-white shadow-md shadow-orange-950/40 font-bold'
+                      : 'bg-neutral-900/90 text-neutral-300 hover:text-white hover:bg-neutral-800 border border-neutral-800'
+                  }`}
+                >
+                  {cat !== 'Todos' && (
+                    <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-orange-500'}`} />
+                  )}
+                  <span>{cat}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Featured Header Banner Carousel */}
+      {currentFeatured && selectedCategory === 'Todos' && (
+        <section 
+          onMouseEnter={() => setIsPaused(true)}
+          onMouseLeave={() => setIsPaused(false)}
+          onTouchStart={() => setIsPaused(true)}
+          onTouchEnd={() => setIsPaused(false)}
+          className="relative h-64 sm:h-80 md:h-96 w-full overflow-hidden transition-all duration-500"
+        >
           {/* Background image backdrop */}
-          {featuredMovie.posterUrl ? (
+          {currentFeatured.posterUrl ? (
             <img
-              src={featuredMovie.posterUrl}
-              alt={featuredMovie.name}
+              key={currentFeatured.id}
+              src={currentFeatured.posterUrl}
+              alt={currentFeatured.name}
               referrerPolicy="no-referrer"
-              className="w-full h-full object-cover blur-sm opacity-35 scale-105"
+              className="w-full h-full object-cover blur-sm opacity-35 scale-105 transition-all duration-700 animate-in fade-in"
             />
           ) : (
             <div className="w-full h-full bg-gradient-to-r from-orange-950/30 to-neutral-900" />
@@ -139,155 +478,330 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <div className="absolute inset-0 bg-gradient-to-t from-[#090a0f] via-[#090a0f]/60 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#090a0f] via-transparent to-transparent" />
 
-          {/* Content Overlay */}
+          {/* Content Overlay (Clean layout without synopsis and without internal tag) */}
           <div className="absolute bottom-6 left-4 sm:left-8 right-4 max-w-2xl space-y-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-orange-500 text-white">
-                Destaque
+              <span className="text-xs text-orange-400 font-bold uppercase tracking-wider">
+                {currentFeatured.category || 'Em Destaque'}
               </span>
-              <span className="text-xs text-neutral-300 font-medium">
-                {featuredMovie.category}
-              </span>
+              {currentFeatured.year && (
+                <span className="text-xs text-neutral-400 font-medium">
+                  • {currentFeatured.year}
+                </span>
+              )}
             </div>
 
             <h1 className="text-2xl sm:text-4xl font-black text-white font-['Outfit'] tracking-tight line-clamp-2">
-              {featuredMovie.name}
+              {currentFeatured.name}
             </h1>
 
-            <div className="flex items-center gap-3 pt-1">
+            <div className="flex items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => onSelectMovie(featuredMovie)}
-                className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold py-2.5 px-5 rounded-xl text-xs shadow-lg shadow-orange-950/40 active:scale-95 transition-all"
+                onClick={() => {
+                  if ('seasons' in currentFeatured) {
+                    onSelectSeries(currentFeatured as SeriesItem);
+                  } else {
+                    onSelectMovie(currentFeatured as MovieItem);
+                  }
+                }}
+                className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold py-2.5 px-6 rounded-xl text-xs shadow-lg shadow-orange-950/40 active:scale-95 transition-all cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-white stroke-none" />
                 <span>Assistir</span>
               </button>
             </div>
           </div>
+
+          {/* Pager Dots */}
+          {featuredList.length > 1 && (
+            <div className="absolute bottom-4 right-6 flex items-center gap-1.5 z-10">
+              {featuredList.map((_, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setCurrentFeaturedIndex(idx);
+                    setIsPaused(true);
+                  }}
+                  className={`h-1.5 rounded-full transition-all duration-300 ${
+                    idx === currentFeaturedIndex 
+                      ? 'w-6 bg-orange-500' 
+                      : 'w-1.5 bg-white/30 hover:bg-white/60'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
         </section>
+      )}
+
+      {/* If a specific category is selected, render its items */}
+      {selectedCategory !== 'Todos' && (
+        <div className="space-y-6">
+          {(() => {
+            const catMovies = movies.filter(m => m.category?.toLowerCase() === selectedCategory.toLowerCase());
+            const catSeries = series.filter(s => s.category?.toLowerCase() === selectedCategory.toLowerCase());
+            const catChannels = channels.filter(ch => ch.category?.toLowerCase() === selectedCategory.toLowerCase());
+
+            return (
+              <>
+                {catMovies.length > 0 && (
+                  <section className="px-4 max-w-7xl mx-auto space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Film className="w-4 h-4 text-amber-400" />
+                        <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                          {selectedCategory} (Filmes)
+                        </h2>
+                        <span className="text-xs text-neutral-500 font-medium">({catMovies.length})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onNavigateTab('movies')}
+                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                      >
+                        Ver na aba Filmes <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                      {catMovies.map(movie => (
+                        <div
+                          key={`cat_m_${movie.id}`}
+                          onClick={() => onSelectMovie(movie)}
+                          className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-amber-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                        >
+                          <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                            {movie.posterUrl ? (
+                              <img src={movie.posterUrl} alt={movie.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Film className="w-8 h-8" /></div>
+                            )}
+                            {movie.year && (
+                              <span className="absolute top-2 left-2 bg-black/70 backdrop-blur-md text-white text-[9px] font-bold px-1.5 py-0.5 rounded">{movie.year}</span>
+                            )}
+                          </div>
+                          <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{movie.name}</h4>
+                          <p className="text-[10px] text-neutral-500 truncate mt-0.5">{movie.category}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {catSeries.length > 0 && (
+                  <section className="px-4 max-w-7xl mx-auto space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Clapperboard className="w-4 h-4 text-rose-400" />
+                        <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                          {selectedCategory} (Séries)
+                        </h2>
+                        <span className="text-xs text-neutral-500 font-medium">({catSeries.length})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onNavigateTab('series')}
+                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                      >
+                        Ver na aba Séries <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                      {catSeries.map(s => (
+                        <div
+                          key={`cat_s_${s.id}`}
+                          onClick={() => onSelectSeries(s)}
+                          className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-rose-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                        >
+                          <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                            {s.posterUrl ? (
+                              <img src={s.posterUrl} alt={s.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Clapperboard className="w-8 h-8" /></div>
+                            )}
+                            <span className="absolute bottom-2 right-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                              {s.seasons?.length || 1} Temp
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{s.name}</h4>
+                          <p className="text-[10px] text-neutral-500 truncate mt-0.5">{s.category}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {catChannels.length > 0 && (
+                  <section className="px-4 max-w-7xl mx-auto space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Tv className="w-4 h-4 text-orange-500" />
+                        <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                          {selectedCategory} (Canais)
+                        </h2>
+                        <span className="text-xs text-neutral-500 font-medium">({catChannels.length})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onNavigateTab('live')}
+                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                      >
+                        Ver na aba TV ao Vivo <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                      {catChannels.map(ch => (
+                        <div
+                          key={`cat_ch_${ch.id}`}
+                          onClick={() => onPlayChannel(ch)}
+                          className="group relative flex-shrink-0 w-36 sm:w-44 p-3 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-orange-500/60 cursor-pointer transition-all active:scale-95 shadow-md"
+                        >
+                          <div className="w-full h-20 rounded-xl bg-neutral-900/90 flex items-center justify-center p-2 mb-2 relative overflow-hidden border border-neutral-800">
+                            {ch.logoUrl ? (
+                              <img src={ch.logoUrl} alt={ch.name} referrerPolicy="no-referrer" className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200" />
+                            ) : (
+                              <Tv className="w-8 h-8 text-neutral-600" />
+                            )}
+                          </div>
+                          <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{ch.name}</h4>
+                          <p className="text-[10px] text-neutral-500 truncate mt-0.5">{ch.category}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </>
+            );
+          })()}
+        </div>
       )}
 
       {/* SECTION 1: CONTINUE ASSISTINDO (History) */}
-      {history.length > 0 && (
-        <section className="px-4 max-w-7xl mx-auto space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-orange-400" />
-              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                Continue Assistindo
-              </h2>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => scrollRef(historyRef.current, -300)}
-                className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => scrollRef(historyRef.current, 300)}
-                className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          <div
-            ref={historyRef}
-            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
-          >
-            {history.map((item) => {
-              const isSelected = selectedHistoryId === item.id;
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => {
-                    setSelectedHistoryId(isSelected ? null : item.id);
-                  }}
-                  className={`group relative flex-shrink-0 w-60 sm:w-72 p-3 rounded-2xl bg-neutral-900/80 hover:bg-neutral-800/80 border transition-all cursor-pointer ${
-                    isSelected 
-                      ? 'border-orange-500 shadow-lg shadow-orange-950/40 ring-1 ring-orange-500/50' 
-                      : 'border-neutral-800/90 hover:border-orange-500/50'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 shrink-0 group-hover:scale-105 transition-transform overflow-hidden">
-                      {item.posterUrl ? (
-                        <img 
-                          src={item.posterUrl} 
-                          alt={item.title} 
-                          className="w-full h-full object-cover rounded-xl"
-                          onError={(e) => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        <Play className="w-5 h-5 fill-orange-500 stroke-none ml-0.5" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-[9px] uppercase font-bold text-orange-400 tracking-wider">
-                        {item.type === 'live' ? 'TV ao Vivo' : item.type === 'movie' ? 'Filme' : 'Série'}
-                      </span>
-                      <h4 className="text-xs font-bold text-white truncate mt-0.5">
-                        {item.title}
-                      </h4>
-                      {item.seriesName && (
-                        <p className="text-[10px] text-neutral-400 truncate">
-                          {item.seriesName} {item.seasonEpisode ? `(${item.seasonEpisode})` : ''}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Active controls overlay on selected card */}
-                  {isSelected && (
-                    <div 
-                      className="absolute inset-0 z-20 rounded-2xl bg-black/75 backdrop-blur-[2px] flex items-center justify-center transition-all animate-in fade-in duration-200"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedHistoryId(null);
-                      }}
-                    >
-                      {/* Native red trash icon in top-right dark circular button */}
-                      <button
-                        type="button"
-                        title="Remover de Continue Assistindo"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedHistoryId(null);
-                          onRemoveHistoryItem?.(item.id);
-                        }}
-                        className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-neutral-800 border border-white/15 flex items-center justify-center text-red-500 hover:text-red-400 transition-colors shadow-md active:scale-90"
-                      >
-                        <Trash2 className="w-4 h-4 stroke-[2.2]" />
-                      </button>
-
-                      {/* Orange primary circular play button centered */}
-                      <button
-                        type="button"
-                        title="Continuar reprodução"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedHistoryId(null);
-                          onPlayHistoryItem(item);
-                        }}
-                        className="w-11 h-11 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-lg shadow-orange-950/70 transition-transform hover:scale-105 active:scale-95"
-                      >
-                        <Play className="w-5 h-5 fill-white stroke-none ml-0.5" />
-                      </button>
-                    </div>
-                  )}
+      {selectedCategory === 'Todos' && (
+        <>
+          {history.length > 0 && (
+            <section className="px-4 max-w-7xl mx-auto space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-orange-400" />
+                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                    Continue Assistindo
+                  </h2>
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => scrollRef(historyRef.current, -300)}
+                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollRef(historyRef.current, 300)}
+                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div
+                ref={historyRef}
+                className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+              >
+                {history.map((item) => {
+                  const isSelected = selectedHistoryId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedHistoryId(isSelected ? null : item.id);
+                      }}
+                      className={`group relative flex-shrink-0 w-60 sm:w-72 p-3 rounded-2xl bg-neutral-900/80 hover:bg-neutral-800/80 border transition-all cursor-pointer ${
+                        isSelected 
+                          ? 'border-orange-500 shadow-lg shadow-orange-950/40 ring-1 ring-orange-500/50' 
+                          : 'border-neutral-800/90 hover:border-orange-500/50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 shrink-0 group-hover:scale-105 transition-transform overflow-hidden">
+                          {item.posterUrl ? (
+                            <img 
+                              src={item.posterUrl} 
+                              alt={item.title} 
+                              className="w-full h-full object-cover rounded-xl"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <Play className="w-5 h-5 fill-orange-500 stroke-none ml-0.5" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[9px] uppercase font-bold text-orange-400 tracking-wider">
+                            {item.type === 'live' ? 'TV ao Vivo' : item.type === 'movie' ? 'Filme' : 'Série'}
+                          </span>
+                          <h4 className="text-xs font-bold text-white truncate mt-0.5">
+                            {item.title}
+                          </h4>
+                          {item.seriesName && (
+                            <p className="text-[10px] text-neutral-400 truncate">
+                              {item.seriesName} {item.seasonEpisode ? `(${item.seasonEpisode})` : ''}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Active controls overlay on selected card */}
+                      {isSelected && (
+                        <div 
+                          className="absolute inset-0 z-20 rounded-2xl bg-black/75 backdrop-blur-[2px] flex items-center justify-center transition-all animate-in fade-in duration-200"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedHistoryId(null);
+                          }}
+                        >
+                          {/* Native red trash icon in top-right dark circular button */}
+                          <button
+                            type="button"
+                            title="Remover de Continue Assistindo"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedHistoryId(null);
+                              onRemoveHistoryItem?.(item.id);
+                            }}
+                            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-neutral-800 border border-white/15 flex items-center justify-center text-red-500 hover:text-red-400 transition-colors shadow-md active:scale-90"
+                          >
+                            <Trash2 className="w-4 h-4 stroke-[2.2]" />
+                          </button>
+
+                          {/* Orange primary circular play button centered */}
+                          <button
+                            type="button"
+                            title="Continuar reprodução"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedHistoryId(null);
+                              onPlayHistoryItem(item);
+                            }}
+                            className="w-11 h-11 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-lg shadow-orange-950/70 transition-transform hover:scale-105 active:scale-95"
+                          >
+                            <Play className="w-5 h-5 fill-white stroke-none ml-0.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
       {/* SECTION 2: FAVORITOS */}
       {favorites.length > 0 && (
@@ -570,6 +1084,220 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
         )}
       </section>
+
+      {/* SECTION 7: FILMES POPULARES (TMDb Popular Movies) */}
+      {popularMoviesList.length > 0 && (
+        <section className="px-4 max-w-7xl mx-auto space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                Filmes populares
+              </h2>
+              <span className="text-xs text-neutral-500 font-medium">
+                (TMDb)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('movies')}
+              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+            >
+              Ver mais <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div
+            ref={popMoviesRef}
+            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+          >
+            {popularMoviesList.map((movie) => (
+              <div
+                key={`pop_movie_${movie.id}`}
+                onClick={() => onSelectMovie(movie)}
+                className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-amber-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+              >
+                <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                  {movie.posterUrl ? (
+                    <img
+                      src={movie.posterUrl}
+                      alt={movie.name}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
+                      <Film className="w-8 h-8" />
+                    </div>
+                  )}
+
+                  {movie.rating ? (
+                    <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                      ★ {movie.rating}
+                    </span>
+                  ) : movie.year ? (
+                    <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                      {movie.year}
+                    </span>
+                  ) : null}
+                </div>
+
+                <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
+                  {movie.name}
+                </h4>
+                <p className="text-[10px] text-neutral-500 truncate mt-0.5">
+                  {movie.category}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* SECTION 8: SÉRIES POPULARES (TMDb Popular TV) */}
+      {popularSeriesList.length > 0 && (
+        <section className="px-4 max-w-7xl mx-auto space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-rose-400" />
+              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                Séries populares
+              </h2>
+              <span className="text-xs text-neutral-500 font-medium">
+                (TMDb)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('series')}
+              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+            >
+              Ver mais <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div
+            ref={popSeriesRef}
+            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+          >
+            {popularSeriesList.map((s) => (
+              <div
+                key={`pop_series_${s.id}`}
+                onClick={() => onSelectSeries(s)}
+                className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-rose-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+              >
+                <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                  {s.posterUrl ? (
+                    <img
+                      src={s.posterUrl}
+                      alt={s.name}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
+                      <Clapperboard className="w-8 h-8" />
+                    </div>
+                  )}
+
+                  <span className="absolute bottom-2 right-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                    {s.seasons?.length || 1} Temp
+                  </span>
+                </div>
+
+                <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
+                  {s.name}
+                </h4>
+                <p className="text-[10px] text-neutral-500 truncate mt-0.5">
+                  {s.category}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* SECTION 9: LANÇAMENTOS (Now Playing & Airing Releases) */}
+      {newReleasesList.length > 0 && (
+        <section className="px-4 max-w-7xl mx-auto space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Rocket className="w-4 h-4 text-emerald-400" />
+              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                Lançamentos
+              </h2>
+              <span className="text-xs text-neutral-500 font-medium">
+                (Em Cartaz)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('movies')}
+              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+            >
+              Ver mais <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div
+            ref={newReleasesRef}
+            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+          >
+            {newReleasesList.map((item) => {
+              const isMovie = 'streamUrl' in item;
+              return (
+                <div
+                  key={`release_${item.id}`}
+                  onClick={() => isMovie ? onSelectMovie(item as MovieItem) : onSelectSeries(item as SeriesItem)}
+                  className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-emerald-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                >
+                  <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                    {item.posterUrl ? (
+                      <img
+                        src={item.posterUrl}
+                        alt={item.name}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
+                        {isMovie ? <Film className="w-8 h-8" /> : <Clapperboard className="w-8 h-8" />}
+                      </div>
+                    )}
+
+                    {item.year && (
+                      <span className="absolute top-2 left-2 bg-emerald-600/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                        {item.year}
+                      </span>
+                    )}
+
+                    {!isMovie && (
+                      <span className="absolute bottom-2 left-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                        Série
+                      </span>
+                    )}
+
+                    {item.rating && (
+                      <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                        ★ {item.rating}
+                      </span>
+                    )}
+                  </div>
+
+                  <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
+                    {item.name}
+                  </h4>
+                  <p className="text-[10px] text-neutral-500 truncate mt-0.5">
+                    {item.category}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+        </>
+      )}
     </div>
   );
 };

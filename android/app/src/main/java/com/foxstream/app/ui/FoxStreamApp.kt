@@ -91,7 +91,8 @@ fun FoxStreamApp(
             route.startsWith("movie_details/") -> {
                 val rawId = route.removePrefix("movie_details/")
                 val movieId = NavDestinations.parseMovieId(rawId)
-                val foundMovie = movies.find { it.id == movieId } ?: movies.find { it.streamUrl == movieId }
+                val foundMovie = movies.find { it.id == movieId } ?: movies.find { it.streamUrl == movieId } ?:
+                    (viewModel.popularMovies + viewModel.trendingMovies + viewModel.newReleases).find { it.id == movieId }
                 if (foundMovie != null) {
                     selectedMovieForDetails = foundMovie
                 }
@@ -294,6 +295,10 @@ fun FoxStreamApp(
                         channels = channels,
                         movies = movies,
                         seriesList = seriesList,
+                        popularMovies = viewModel.popularMovies,
+                        popularSeries = viewModel.popularSeries,
+                        newReleases = viewModel.newReleases,
+                        trendingMovies = viewModel.trendingMovies,
                         featuredBannerItems = viewModel.featuredBannerItems,
                         isLoading = viewModel.isLoading,
                         onPlay = onPlayStream,
@@ -305,9 +310,18 @@ fun FoxStreamApp(
                             selectedSeriesForDetails = s
                             currentTab = AppNavTab.SERIES
                         },
-                        onOpenMovie = { movie ->
-                            val route = NavDestinations.buildMovieDetailsRoute(movie.id)
-                            navigateToRoute(route)
+                        onOpenMovie = { movie: MovieItem ->
+                            if (movie.id.startsWith("series_") || movie.id.startsWith("-")) {
+                                val sId = movie.id.removePrefix("series_").removePrefix("-")
+                                val s = seriesList.find { it.id == sId }
+                                if (s != null) {
+                                    selectedSeriesForDetails = s
+                                    currentTab = AppNavTab.SERIES
+                                }
+                            } else {
+                                val route = NavDestinations.buildMovieDetailsRoute(movie.id)
+                                navigateToRoute(route)
+                            }
                         },
                         onRemoveHistory = { item ->
                             viewModel.removeHistoryItem(item)
@@ -497,10 +511,36 @@ fun FoxStreamApp(
                 onBack = { selectedMovieForDetails = null },
                 onToggleFavorite = { viewModel.toggleFavoriteMovie(it) },
                 onPlay = { streamUrl, title, type, _ ->
-                    playMedia(streamUrl, title, type, null, null)
+                    val finalUrl = if (streamUrl.isBlank()) {
+                        val matched = viewModel.findLocalMovieStream(movie.name, movie.year)
+                        if (matched != null) {
+                            matched.streamUrl
+                        } else {
+                            android.widget.Toast.makeText(context, "Conteúdo não disponível no seu servidor IPTV", android.widget.Toast.LENGTH_SHORT).show()
+                            ""
+                        }
+                    } else {
+                        streamUrl
+                    }
+                    if (finalUrl.isNotBlank()) {
+                        playMedia(finalUrl, title, type, null, null)
+                    }
                 },
                 onNavigateToPlayer = { route ->
-                    navigateToRoute(route)
+                    val finalRoute = if (movie.streamUrl.isBlank()) {
+                        val matched = viewModel.findLocalMovieStream(movie.name, movie.year)
+                        if (matched != null) {
+                            NavDestinations.buildPlayerRoute(matched.streamUrl)
+                        } else {
+                            android.widget.Toast.makeText(context, "Conteúdo não disponível no seu servidor IPTV", android.widget.Toast.LENGTH_SHORT).show()
+                            ""
+                        }
+                    } else {
+                        route
+                    }
+                    if (finalRoute.isNotBlank()) {
+                        navigateToRoute(finalRoute)
+                    }
                 },
                 onLoadDetails = { m, callback ->
                     viewModel.getMovieDetailsOnDemand(m, callback)

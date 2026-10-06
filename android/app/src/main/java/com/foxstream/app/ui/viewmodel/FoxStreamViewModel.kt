@@ -12,10 +12,14 @@ import com.foxstream.app.data.api.OmdbApiClient
 import com.foxstream.app.data.api.TmdbApiClient
 import com.foxstream.app.util.SearchUtils
 import com.foxstream.app.data.local.AppDatabase
+import com.foxstream.app.data.local.HomeCacheManager
+import com.foxstream.app.util.SmartMatch
 import com.foxstream.app.data.model.*
 import com.foxstream.app.data.parser.M3UParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,9 +69,14 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         private set
 
     val featuredBannerItems = mutableStateListOf<HeroBannerItem>()
+    val trendingMovies = mutableStateListOf<MovieItem>()
+    val popularMovies = mutableStateListOf<MovieItem>()
+    val popularSeries = mutableStateListOf<SeriesItem>()
+    val newReleases = mutableStateListOf<MovieItem>()
 
     init {
         loadInitialData()
+        refreshFeaturedBanners(forceRefresh = true)
     }
 
     private fun loadInitialData() {
@@ -136,8 +145,103 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
                 seriesList.clear()
                 seriesList.addAll(pSeries)
 
-                // Refresh featured banners using TMDB matching or cached/playlist fallback
-                refreshFeaturedBanners(playlistId, pMovies, pSeries)
+                // 1. PHASE 1: Immediate Local-First Hydration (< 10ms)
+                val cached = withContext(Dispatchers.IO) {
+                    HomeCacheManager.load(getApplication(), db, playlistId)
+                }
+                
+                val fallbackBanners = buildLocalFallbackBanners(pMovies, pSeries)
+                val fallbackTrending = pMovies.take(15)
+                val fallbackPopMovies = pMovies.shuffled().take(15)
+                val fallbackPopSeries = pSeries.take(15)
+
+                val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
+                val lastYear = (java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) - 1).toString()
+                val moviesReleases = pMovies.filter { it.year == currentYear || it.year == lastYear }
+                val seriesReleases = pSeries.filter { it.year == currentYear || it.year == lastYear }
+
+                val combinedReleasesList = mutableListOf<MovieItem>()
+                moviesReleases.forEach { combinedReleasesList.add(it) }
+                seriesReleases.forEach { s ->
+                    combinedReleasesList.add(
+                        MovieItem(
+                            id = "series_${s.id}", // prefixed ID to indicate converted Series Item
+                            playlistId = s.playlistId,
+                            name = s.name,
+                            streamUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: "",
+                            posterUrl = s.posterUrl,
+                            backdropUrl = s.backdropUrl,
+                            rating = s.rating,
+                            description = s.description,
+                            year = s.year,
+                            category = s.category
+                        )
+                    )
+                }
+
+                val fallbackReleases = if (combinedReleasesList.isNotEmpty()) {
+                    combinedReleasesList.sortedWith(
+                        compareByDescending<MovieItem> { it.year }
+                        .thenByDescending { it.id }
+                    ).take(20)
+                } else {
+                    val fallbacks = mutableListOf<MovieItem>()
+                    pMovies.sortedByDescending { it.id }.take(10).forEach { fallbacks.add(it) }
+                    pSeries.sortedByDescending { it.id }.take(10).forEach { s ->
+                        fallbacks.add(
+                            MovieItem(
+                                id = "series_${s.id}",
+                                playlistId = s.playlistId,
+                                name = s.name,
+                                streamUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: "",
+                                posterUrl = s.posterUrl,
+                                backdropUrl = s.backdropUrl,
+                                rating = s.rating,
+                                description = s.description,
+                                year = s.year,
+                                category = s.category
+                            )
+                        )
+                    }
+                    fallbacks.sortedByDescending { it.id }.take(15)
+                }
+
+                if (cached != null) {
+                    // Render from persistent cache, falling back to local playlist items if any carousel list was empty
+                    featuredBannerItems.clear()
+                    featuredBannerItems.addAll(cached.featuredBanners.ifEmpty { fallbackBanners })
+
+                    trendingMovies.clear()
+                    trendingMovies.addAll(cached.trendingMovies.ifEmpty { fallbackTrending })
+
+                    popularMovies.clear()
+                    popularMovies.addAll(cached.popularMovies.ifEmpty { fallbackPopMovies })
+
+                    popularSeries.clear()
+                    popularSeries.addAll(cached.popularSeries.ifEmpty { fallbackPopSeries })
+
+                    newReleases.clear()
+                    newReleases.addAll(cached.newReleases.ifEmpty { fallbackReleases })
+                } else {
+                    // First run (empty cache): Immediately populate from local items so Home renders in 0ms!
+                    featuredBannerItems.clear()
+                    featuredBannerItems.addAll(fallbackBanners)
+                    trendingMovies.clear()
+                    trendingMovies.addAll(fallbackTrending)
+                    popularMovies.clear()
+                    popularMovies.addAll(fallbackPopMovies)
+                    popularSeries.clear()
+                    popularSeries.addAll(fallbackPopSeries)
+                    newReleases.clear()
+                    newReleases.addAll(fallbackReleases)
+                }
+
+                // 2. PHASE 2: Background TMDb Check & Progressive Update (Dispatchers.IO)
+                // Always check & enrich TMDb data in background if cache is missing or stale (> 24h)
+                val isCacheFresh = cached != null && (System.currentTimeMillis() - cached.timestamp < HomeCacheManager.CACHE_EXPIRY_MS)
+                if (!isCacheFresh) {
+                    refreshFeaturedBanners(playlistId, pMovies, pSeries)
+                }
             } catch (e: Exception) {
                 errorMessage = "Erro ao carregar conteúdo da lista: ${e.localizedMessage}"
             } finally {
@@ -146,31 +250,50 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun isMatch(
-        localName: String,
-        localYear: String?,
-        tmdbTitle: String,
-        tmdbOrigTitle: String?,
-        tmdbYear: String?
-    ): Boolean {
-        val localNorm = SearchUtils.normalize(localName)
-        val tmdbNorm = SearchUtils.normalize(tmdbTitle)
-        val tmdbOrigNorm = tmdbOrigTitle?.let { SearchUtils.normalize(it) } ?: ""
+    fun findLocalMovieStream(name: String, year: String?): MovieItem? {
+        var bestMovie: MovieItem? = null
+        var bestScore = 64 // cut score of 65/100
 
-        val titleMatches = localNorm.contains(tmdbNorm) || tmdbNorm.contains(localNorm) ||
-                (tmdbOrigNorm.isNotBlank() && (localNorm.contains(tmdbOrigNorm) || tmdbOrigNorm.contains(localNorm)))
-
-        if (!titleMatches) return false
-
-        // Year check: allow +/- 1 year if both are present
-        if (!localYear.isNullOrBlank() && !tmdbYear.isNullOrBlank()) {
-            val ly = localYear.toIntOrNull()
-            val ty = tmdbYear.toIntOrNull()
-            if (ly != null && ty != null) {
-                return Math.abs(ly - ty) <= 1
+        for (m in movies) {
+            val res = com.foxstream.app.util.SmartMatch.evaluateMatch(
+                localRawName = m.name,
+                localCategory = m.category,
+                localRawYear = m.year,
+                tmdbTitle = name,
+                tmdbOriginalTitle = null,
+                tmdbYear = year,
+                tmdbGenres = null
+            )
+            if (res.isMatch && res.score > bestScore) {
+                bestScore = res.score
+                bestMovie = m
+                if (bestScore >= 98) break
             }
         }
-        return true
+        return bestMovie
+    }
+
+    fun findLocalSeries(name: String, year: String?): SeriesItem? {
+        var bestSeries: SeriesItem? = null
+        var bestScore = 64
+
+        for (s in seriesList) {
+            val res = com.foxstream.app.util.SmartMatch.evaluateMatch(
+                localRawName = s.name,
+                localCategory = s.category,
+                localRawYear = s.year,
+                tmdbTitle = name,
+                tmdbOriginalTitle = null,
+                tmdbYear = year,
+                tmdbGenres = null
+            )
+            if (res.isMatch && res.score > bestScore) {
+                bestScore = res.score
+                bestSeries = s
+                if (bestScore >= 98) break
+            }
+        }
+        return bestSeries
     }
 
     fun refreshFeaturedBanners(
@@ -182,103 +305,406 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val trendingMovies = TmdbApiClient.getTrendingMovies()
-                    val trendingTv = TmdbApiClient.getTrendingTv()
+                    // Pre-build index maps for O(1) instant title lookup
+                    val movieCleanMap = mutableMapOf<String, MovieItem>()
+                    currentMovies.forEach { m ->
+                        val (cleaned, _) = SmartMatch.cleanTitle(m.name)
+                        if (cleaned.isNotBlank() && !movieCleanMap.containsKey(cleaned)) {
+                            movieCleanMap[cleaned] = m
+                        }
+                    }
+                    val seriesCleanMap = mutableMapOf<String, SeriesItem>()
+                    currentSeries.forEach { s ->
+                        val (cleaned, _) = SmartMatch.cleanTitle(s.name)
+                        if (cleaned.isNotBlank() && !seriesCleanMap.containsKey(cleaned)) {
+                            seriesCleanMap[cleaned] = s
+                        }
+                    }
+
+                    fun findMovie(tmdb: com.foxstream.app.data.api.TmdbResult): MovieItem? {
+                        val tmdbTitle = tmdb.title ?: ""
+                        if (tmdbTitle.isBlank()) return null
+                        val (cleanedTmdb, _) = SmartMatch.cleanTitle(tmdbTitle)
+                        val (cleanedOrig, _) = if (!tmdb.originalTitle.isNullOrBlank()) SmartMatch.cleanTitle(tmdb.originalTitle) else Pair("", null)
+
+                        // 1. Instant O(1) candidate evaluation
+                        if (cleanedTmdb.isNotBlank()) {
+                            movieCleanMap[cleanedTmdb]?.let { local ->
+                                val res = SmartMatch.evaluateMatch(
+                                    localRawName = local.name,
+                                    localCategory = local.category,
+                                    localRawYear = local.year,
+                                    tmdbTitle = tmdbTitle,
+                                    tmdbOriginalTitle = tmdb.originalTitle,
+                                    tmdbYear = tmdb.year,
+                                    tmdbGenres = tmdb.genre
+                                )
+                                if (res.isMatch) return local
+                            }
+                        }
+                        if (cleanedOrig.isNotBlank()) {
+                            movieCleanMap[cleanedOrig]?.let { local ->
+                                val res = SmartMatch.evaluateMatch(
+                                    localRawName = local.name,
+                                    localCategory = local.category,
+                                    localRawYear = local.year,
+                                    tmdbTitle = tmdbTitle,
+                                    tmdbOriginalTitle = tmdb.originalTitle,
+                                    tmdbYear = tmdb.year,
+                                    tmdbGenres = tmdb.genre
+                                )
+                                if (res.isMatch) return local
+                            }
+                        }
+
+                        // 2. Score-based fallback (evaluating strict SmartMatch >= 85)
+                        var bestMovie: MovieItem? = null
+                        var bestScore = 84
+
+                        for (m in currentMovies) {
+                            val res = SmartMatch.evaluateMatch(
+                                localRawName = m.name,
+                                localCategory = m.category,
+                                localRawYear = m.year,
+                                tmdbTitle = tmdbTitle,
+                                tmdbOriginalTitle = tmdb.originalTitle,
+                                tmdbYear = tmdb.year,
+                                tmdbGenres = tmdb.genre
+                            )
+                            if (res.isMatch && res.score > bestScore) {
+                                bestScore = res.score
+                                bestMovie = m
+                                if (bestScore >= 95) break
+                            }
+                        }
+                        return bestMovie
+                    }
+
+                    fun findSeries(tmdb: com.foxstream.app.data.api.TmdbResult): SeriesItem? {
+                        val tmdbTitle = tmdb.title ?: ""
+                        if (tmdbTitle.isBlank()) return null
+                        val (cleanedTmdb, _) = SmartMatch.cleanTitle(tmdbTitle)
+                        val (cleanedOrig, _) = if (!tmdb.originalTitle.isNullOrBlank()) SmartMatch.cleanTitle(tmdb.originalTitle) else Pair("", null)
+
+                        // 1. Instant O(1) candidate evaluation
+                        if (cleanedTmdb.isNotBlank()) {
+                            seriesCleanMap[cleanedTmdb]?.let { local ->
+                                val res = SmartMatch.evaluateMatch(
+                                    localRawName = local.name,
+                                    localCategory = local.category,
+                                    localRawYear = local.year,
+                                    tmdbTitle = tmdbTitle,
+                                    tmdbOriginalTitle = tmdb.originalTitle,
+                                    tmdbYear = tmdb.year,
+                                    tmdbGenres = tmdb.genre
+                                )
+                                if (res.isMatch) return local
+                            }
+                        }
+                        if (cleanedOrig.isNotBlank()) {
+                            seriesCleanMap[cleanedOrig]?.let { local ->
+                                val res = SmartMatch.evaluateMatch(
+                                    localRawName = local.name,
+                                    localCategory = local.category,
+                                    localRawYear = local.year,
+                                    tmdbTitle = tmdbTitle,
+                                    tmdbOriginalTitle = tmdb.originalTitle,
+                                    tmdbYear = tmdb.year,
+                                    tmdbGenres = tmdb.genre
+                                )
+                                if (res.isMatch) return local
+                            }
+                        }
+
+                        // 2. Score-based fallback (evaluating strict SmartMatch >= 85)
+                        var bestSeries: SeriesItem? = null
+                        var bestScore = 84
+
+                        for (s in currentSeries) {
+                            val res = SmartMatch.evaluateMatch(
+                                localRawName = s.name,
+                                localCategory = s.category,
+                                localRawYear = s.year,
+                                tmdbTitle = tmdbTitle,
+                                tmdbOriginalTitle = tmdb.originalTitle,
+                                tmdbYear = tmdb.year,
+                                tmdbGenres = tmdb.genre
+                            )
+                            if (res.isMatch && res.score > bestScore) {
+                                bestScore = res.score
+                                bestSeries = s
+                                if (bestScore >= 95) break
+                            }
+                        }
+                        return bestSeries
+                    }
+
+                    // Parallel fetch of all 5 TMDb endpoints
+                    val (trendingMoviesData, trendingTvData, popMoviesData, popTvData, nowPlayingData) = coroutineScope {
+                        val d1 = async { TmdbApiClient.getTrendingMovies() }
+                        val d2 = async { TmdbApiClient.getTrendingTv() }
+                        val d3 = async { TmdbApiClient.getPopularMovies() }
+                        val d4 = async { TmdbApiClient.getPopularTv() }
+                        val d5 = async { TmdbApiClient.getNowPlayingMovies() }
+                        listOf(d1.await(), d2.await(), d3.await(), d4.await(), d5.await())
+                    }
+
+                    // 1. Hero banners (Directly powered by TMDB Trending Movies & TV)
                     val matchedBanners = mutableListOf<HeroBannerItem>()
+                    for (tmdbMovie in trendingMoviesData.take(12)) {
+                        val mTitle = tmdbMovie.title ?: continue
+                        val matchedMovie = findMovie(tmdbMovie)
+                        val poster = tmdbMovie.poster ?: matchedMovie?.posterUrl ?: ""
+                        val backdrop = tmdbMovie.backdrop ?: matchedMovie?.backdropUrl ?: poster
+                        val year = tmdbMovie.year ?: matchedMovie?.year
+                        val rating = tmdbMovie.rating ?: matchedMovie?.rating
+                        val badge = listOfNotNull(
+                            "FILME",
+                            year,
+                            rating?.let { "★ $it" }
+                        ).joinToString(" • ")
 
-                    // Match movies
-                    for (tmdbMovie in trendingMovies.take(12)) {
-                        val matchedMovie = currentMovies.find { m ->
-                            isMatch(
-                                localName = m.name,
-                                localYear = m.year,
-                                tmdbTitle = tmdbMovie.title ?: "",
-                                tmdbOrigTitle = tmdbMovie.originalTitle,
-                                tmdbYear = tmdbMovie.year
+                        val mItem = matchedMovie?.copy(
+                            posterUrl = poster,
+                            backdropUrl = backdrop,
+                            rating = rating,
+                            description = tmdbMovie.plot ?: matchedMovie.description,
+                            year = year
+                        ) ?: MovieItem(
+                            id = "tmdb_m_${tmdbMovie.tmdbId}",
+                            playlistId = activePlaylistId ?: "",
+                            name = mTitle,
+                            streamUrl = "",
+                            posterUrl = poster,
+                            backdropUrl = backdrop,
+                            rating = rating,
+                            description = tmdbMovie.plot,
+                            year = year,
+                            category = "Destaques"
+                        )
+
+                        matchedBanners.add(
+                            HeroBannerItem(
+                                id = "hero_m_${tmdbMovie.tmdbId}",
+                                title = mTitle,
+                                imageUrl = backdrop.ifBlank { poster },
+                                category = "Filmes em Destaque",
+                                type = ContentType.MOVIE,
+                                streamUrl = mItem.streamUrl,
+                                badgeInfo = badge,
+                                overview = tmdbMovie.plot,
+                                year = year,
+                                movieItem = mItem
                             )
-                        }
-
-                        if (matchedMovie != null) {
-                            val badge = listOfNotNull(
-                                "FILME",
-                                tmdbMovie.year ?: matchedMovie.year,
-                                tmdbMovie.rating?.let { "★ $it" } ?: matchedMovie.rating?.let { "★ $it" },
-                                matchedMovie.category.takeIf { it.isNotBlank() && it != "Filmes" }
-                            ).joinToString(" • ")
-
-                            matchedBanners.add(
-                                HeroBannerItem(
-                                    id = "movie_${matchedMovie.id}",
-                                    title = matchedMovie.name,
-                                    imageUrl = tmdbMovie.backdrop ?: tmdbMovie.poster ?: matchedMovie.backdropUrl ?: matchedMovie.posterUrl ?: "",
-                                    category = matchedMovie.category,
-                                    type = ContentType.MOVIE,
-                                    streamUrl = matchedMovie.streamUrl,
-                                    badgeInfo = badge,
-                                    overview = tmdbMovie.plot ?: matchedMovie.description,
-                                    year = tmdbMovie.year ?: matchedMovie.year,
-                                    movieItem = matchedMovie
-                                )
-                            )
-                        }
+                        )
                     }
 
-                    // Match series
-                    for (tmdbTv in trendingTv.take(12)) {
-                        val matchedS = currentSeries.find { s ->
-                            isMatch(
-                                localName = s.name,
-                                localYear = s.year,
-                                tmdbTitle = tmdbTv.title ?: "",
-                                tmdbOrigTitle = tmdbTv.originalTitle,
-                                tmdbYear = tmdbTv.year
-                            )
-                        }
+                    for (tmdbTv in trendingTvData.take(12)) {
+                        val sTitle = tmdbTv.title ?: continue
+                        val matchedS = findSeries(tmdbTv)
+                        val poster = tmdbTv.poster ?: matchedS?.posterUrl ?: ""
+                        val backdrop = tmdbTv.backdrop ?: matchedS?.backdropUrl ?: poster
+                        val year = tmdbTv.year ?: matchedS?.year
+                        val rating = tmdbTv.rating ?: matchedS?.rating
+                        val badge = listOfNotNull(
+                            "SÉRIE",
+                            year,
+                            rating?.let { "★ $it" }
+                        ).joinToString(" • ")
 
-                        if (matchedS != null) {
-                            val firstEpUrl = matchedS.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: ""
-                            val badge = listOfNotNull(
-                                "SÉRIE",
-                                tmdbTv.year ?: matchedS.year,
-                                tmdbTv.rating?.let { "★ $it" } ?: matchedS.rating?.let { "★ $it" },
-                                matchedS.category.takeIf { it.isNotBlank() && it != "Séries" }
-                            ).joinToString(" • ")
+                        val sItem = matchedS?.copy(
+                            posterUrl = poster,
+                            backdropUrl = backdrop,
+                            rating = rating,
+                            description = tmdbTv.plot ?: matchedS.description,
+                            year = year
+                        ) ?: SeriesItem(
+                            id = "tmdb_s_${tmdbTv.tmdbId}",
+                            playlistId = activePlaylistId ?: "",
+                            name = sTitle,
+                            posterUrl = poster,
+                            backdropUrl = backdrop,
+                            rating = rating,
+                            description = tmdbTv.plot,
+                            year = year,
+                            category = "Destaques",
+                            seasons = emptyList()
+                        )
 
-                            matchedBanners.add(
-                                HeroBannerItem(
-                                    id = "series_${matchedS.id}",
-                                    title = matchedS.name,
-                                    imageUrl = tmdbTv.backdrop ?: tmdbTv.poster ?: matchedS.posterUrl ?: "",
-                                    category = matchedS.category,
-                                    type = ContentType.SERIES,
-                                    streamUrl = firstEpUrl,
-                                    badgeInfo = badge,
-                                    overview = tmdbTv.plot ?: matchedS.description,
-                                    year = tmdbTv.year ?: matchedS.year,
-                                    seriesItem = matchedS
-                                )
+                        val firstEpUrl = matchedS?.seasons?.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: ""
+
+                        matchedBanners.add(
+                            HeroBannerItem(
+                                id = "hero_s_${tmdbTv.tmdbId}",
+                                title = sTitle,
+                                imageUrl = backdrop.ifBlank { poster },
+                                category = "Séries em Destaque",
+                                type = ContentType.SERIES,
+                                streamUrl = firstEpUrl,
+                                badgeInfo = badge,
+                                overview = tmdbTv.plot,
+                                year = year,
+                                seriesItem = sItem
                             )
-                        }
+                        )
                     }
 
-                    if (matchedBanners.isNotEmpty()) {
-                        // Sort or interleave to make it look perfectly mixed
-                        val combined = matchedBanners.distinctBy { it.id }.shuffled().take(8)
-                        withContext(Dispatchers.Main) {
-                            featuredBannerItems.clear()
-                            featuredBannerItems.addAll(combined)
-                        }
-                        return@withContext
+                    val finalBanners = if (matchedBanners.isNotEmpty()) {
+                        matchedBanners.distinctBy { it.id }.shuffled().take(10)
+                    } else {
+                        buildLocalFallbackBanners(currentMovies, currentSeries)
                     }
+
+                    // 2. Em Alta (Trending Movies)
+                    val matchedTrending = mutableListOf<MovieItem>()
+                    for (tmdb in trendingMoviesData) {
+                        val local = findMovie(tmdb)
+                        matchedTrending.add(
+                            local?.copy(
+                                posterUrl = tmdb.poster ?: local.posterUrl,
+                                backdropUrl = tmdb.backdrop ?: local.backdropUrl,
+                                rating = tmdb.rating ?: local.rating,
+                                description = tmdb.plot ?: local.description,
+                                year = tmdb.year ?: local.year
+                            ) ?: MovieItem(
+                                id = "tmdb_m_${tmdb.tmdbId}",
+                                playlistId = activePlaylistId ?: "",
+                                name = tmdb.title ?: "",
+                                streamUrl = "",
+                                posterUrl = tmdb.poster,
+                                backdropUrl = tmdb.backdrop,
+                                rating = tmdb.rating,
+                                description = tmdb.plot,
+                                year = tmdb.year,
+                                category = "Em Alta"
+                            )
+                        )
+                    }
+                    val finalTrending = matchedTrending.distinctBy { it.id }
+
+                    // 3. Filmes Populares (Popular Movies)
+                    val matchedPopMovies = mutableListOf<MovieItem>()
+                    for (tmdb in popMoviesData) {
+                        val local = findMovie(tmdb)
+                        matchedPopMovies.add(
+                            local?.copy(
+                                posterUrl = tmdb.poster ?: local.posterUrl,
+                                backdropUrl = tmdb.backdrop ?: local.backdropUrl,
+                                rating = tmdb.rating ?: local.rating,
+                                description = tmdb.plot ?: local.description,
+                                year = tmdb.year ?: local.year
+                            ) ?: MovieItem(
+                                id = "tmdb_m_${tmdb.tmdbId}",
+                                playlistId = activePlaylistId ?: "",
+                                name = tmdb.title ?: "",
+                                streamUrl = "",
+                                posterUrl = tmdb.poster,
+                                backdropUrl = tmdb.backdrop,
+                                rating = tmdb.rating,
+                                description = tmdb.plot,
+                                year = tmdb.year,
+                                category = "Populares"
+                            )
+                        )
+                    }
+                    val finalPopMovies = matchedPopMovies.distinctBy { it.id }
+
+                    // 4. Séries Populares (Popular TV)
+                    val matchedPopSeries = mutableListOf<SeriesItem>()
+                    for (tmdb in popTvData) {
+                        val local = findSeries(tmdb)
+                        matchedPopSeries.add(
+                            local?.copy(
+                                posterUrl = tmdb.poster ?: local.posterUrl,
+                                backdropUrl = tmdb.backdrop ?: local.backdropUrl,
+                                rating = tmdb.rating ?: local.rating,
+                                description = tmdb.plot ?: local.description,
+                                year = tmdb.year ?: local.year
+                            ) ?: SeriesItem(
+                                id = "tmdb_s_${tmdb.tmdbId}",
+                                playlistId = activePlaylistId ?: "",
+                                name = tmdb.title ?: "",
+                                posterUrl = tmdb.poster,
+                                backdropUrl = tmdb.backdrop,
+                                rating = tmdb.rating,
+                                description = tmdb.plot,
+                                year = tmdb.year,
+                                category = "Populares",
+                                seasons = emptyList()
+                            )
+                        )
+                    }
+                    val finalPopSeries = matchedPopSeries.distinctBy { it.id }
+
+                    // 5. Lançamentos (Now Playing Movies)
+                    val matchedReleases = mutableListOf<MovieItem>()
+                    for (tmdb in nowPlayingData) {
+                        val local = findMovie(tmdb)
+                        matchedReleases.add(
+                            local?.copy(
+                                posterUrl = tmdb.poster ?: local.posterUrl,
+                                backdropUrl = tmdb.backdrop ?: local.backdropUrl,
+                                rating = tmdb.rating ?: local.rating,
+                                description = tmdb.plot ?: local.description,
+                                year = tmdb.year ?: local.year
+                            ) ?: MovieItem(
+                                id = "tmdb_m_${tmdb.tmdbId}",
+                                playlistId = activePlaylistId ?: "",
+                                name = tmdb.title ?: "",
+                                streamUrl = "",
+                                posterUrl = tmdb.poster,
+                                backdropUrl = tmdb.backdrop,
+                                rating = tmdb.rating,
+                                description = tmdb.plot,
+                                year = tmdb.year,
+                                category = "Lançamentos"
+                            )
+                        )
+                    }
+                    val finalReleases = matchedReleases.distinctBy { it.id }
+
+                    // Update UI on Main Dispatcher
+                    withContext(Dispatchers.Main) {
+                        featuredBannerItems.clear()
+                        featuredBannerItems.addAll(finalBanners)
+                        trendingMovies.clear()
+                        trendingMovies.addAll(finalTrending)
+                        popularMovies.clear()
+                        popularMovies.addAll(finalPopMovies)
+                        popularSeries.clear()
+                        popularSeries.addAll(finalPopSeries)
+                        newReleases.clear()
+                        newReleases.addAll(finalReleases)
+                    }
+
+                    // PERSIST TO DISK AND ROOM DB CACHE SO NEXT LAUNCH IS INSTANT (0 ms)
+                    HomeCacheManager.save(
+                        context = getApplication(),
+                        db = db,
+                        playlistId = playlistId,
+                        featuredBanners = finalBanners,
+                        trendingMovies = finalTrending,
+                        popularMovies = finalPopMovies,
+                        popularSeries = finalPopSeries,
+                        newReleases = finalReleases
+                    )
                 } catch (e: Exception) {
-                    Log.e("FoxStreamViewModel", "Error crossing TMDB trending with local list: ${e.message}", e)
-                }
+                    Log.e("FoxStreamViewModel", "Error refreshing TMDb categories: ${e.message}", e)
+                    val fallbackBanners = buildLocalFallbackBanners(currentMovies, currentSeries)
+                    val fallbackTrending = currentMovies.filter { !it.posterUrl.isNullOrBlank() }.take(15)
+                    val fallbackPopMovies = currentMovies.filter { !it.posterUrl.isNullOrBlank() }.shuffled().take(15)
+                    val fallbackPopSeries = currentSeries.filter { !it.posterUrl.isNullOrBlank() }.take(15)
+                    val fallbackReleases = currentMovies.filter { !it.posterUrl.isNullOrBlank() && !it.year.isNullOrBlank() }
+                        .sortedByDescending { it.year }
+                        .take(15)
 
-                // Fallback Garantido
-                val fallbackBanners = buildLocalFallbackBanners(currentMovies, currentSeries)
-                withContext(Dispatchers.Main) {
-                    featuredBannerItems.clear()
-                    featuredBannerItems.addAll(fallbackBanners)
+                    withContext(Dispatchers.Main) {
+                        if (featuredBannerItems.isEmpty()) featuredBannerItems.addAll(fallbackBanners)
+                        if (trendingMovies.isEmpty()) trendingMovies.addAll(fallbackTrending)
+                        if (popularMovies.isEmpty()) popularMovies.addAll(fallbackPopMovies)
+                        if (popularSeries.isEmpty()) popularSeries.addAll(fallbackPopSeries)
+                        if (newReleases.isEmpty()) newReleases.addAll(fallbackReleases)
+                    }
                 }
             }
         }
@@ -902,10 +1328,15 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun getSeriesDetailsOnDemand(series: SeriesItem, onLoaded: (List<SeasonItem>) -> Unit) {
-        val playlistId = series.playlistId
+        val targetSeries = if (series.id.startsWith("tmdb_") || series.playlistId.isBlank() || series.seasons.isEmpty()) {
+            findLocalSeries(series.name, series.year) ?: series
+        } else {
+            series
+        }
+        val playlistId = targetSeries.playlistId
 
         // 1. Check in-memory metadata cache first for instant retrieval!
-        val cachedSeries = seriesMetadataCache[series.id]
+        val cachedSeries = seriesMetadataCache[targetSeries.id]
         if (cachedSeries != null) {
             viewModelScope.launch {
                 // Instantly notify seasons/episodes from cache if available
@@ -920,12 +1351,12 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             val p = db.playlistDao().getPlaylistById(playlistId)
 
             // Asynchronous job to fetch seasons/episodes from Xtream Codes (if applicable)
-            var seasons = series.seasons
+            var seasons = targetSeries.seasons
             val iptvLoadJob = launch {
                 if (p != null && p.type == PlaylistType.XTREAM && p.serverUrl != null && p.username != null && p.password != null) {
                     try {
                         val client = XtreamApiClient(p.serverUrl, p.username, p.password)
-                        val fetchedSeasons = client.getSeriesDetails(series.id, series.id)
+                        val fetchedSeasons = client.getSeriesDetails(targetSeries.id, targetSeries.id)
                         if (fetchedSeasons.isNotEmpty()) {
                             seasons = fetchedSeasons
                         }
@@ -936,12 +1367,12 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             // Parallel Asynchronous job to fetch TMDb/OMDb metadata
-            var updatedSeries = cachedSeries ?: series
+            var updatedSeries = cachedSeries ?: targetSeries
             val metadataJob = launch {
                 if (cachedSeries == null) {
                     try {
-                        val cleanName = sanitizeSeriesName(series.name)
-                        var matchedSeries = series
+                        val cleanName = sanitizeSeriesName(targetSeries.name)
+                        var matchedSeries = targetSeries
 
                         // Primary: TMDb (with full PT-BR support and high-resolution backdrop/posters)
                         val tmdb = TmdbApiClient.getSeriesDetails(
@@ -1013,9 +1444,20 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun getMovieDetailsOnDemand(movie: MovieItem, onLoaded: (MovieItem) -> Unit) {
-        val playlistId = movie.playlistId
+        val targetMovie = if (movie.id.startsWith("tmdb_") || movie.streamUrl.isBlank() || movie.playlistId.isBlank()) {
+            findLocalMovieStream(movie.name, movie.year)?.let { local ->
+                movie.copy(
+                    id = local.id,
+                    playlistId = local.playlistId,
+                    streamUrl = local.streamUrl
+                )
+            } ?: movie
+        } else {
+            movie
+        }
+        val playlistId = targetMovie.playlistId
         viewModelScope.launch {
-            var currentUpdated = movie
+            var currentUpdated = targetMovie
             var xtreamImdbId: String? = null
             var xtreamOriginalName: String? = null
 
@@ -1024,7 +1466,7 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             }
             if (p != null && p.type == PlaylistType.XTREAM && p.serverUrl != null && p.username != null && p.password != null) {
                 val client = XtreamApiClient(p.serverUrl, p.username, p.password)
-                val json = client.getVodDetails(movie.id)
+                val json = client.getVodDetails(targetMovie.id)
                 if (json != null && json.has("info")) {
                     val info = json.getJSONObject("info")
                     xtreamImdbId = info.optString("imdb_id").trim().takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
@@ -1033,21 +1475,21 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
                         xtreamOriginalName = null
                     }
 
-                    val plot = info.optString("plot", info.optString("description", movie.description ?: ""))
-                    val rawDirector = info.optString("director", movie.director ?: "")
-                    val rawCast = info.optString("cast", movie.cast ?: "")
+                    val plot = info.optString("plot", info.optString("description", targetMovie.description ?: ""))
+                    val rawDirector = info.optString("director", targetMovie.director ?: "")
+                    val rawCast = info.optString("cast", targetMovie.cast ?: "")
                     val durationSecs = info.optInt("duration_secs", 0)
                     val rawDuration = if (durationSecs > 0) {
                         "${Math.round(durationSecs.toFloat() / 60)} min"
                     } else {
-                        info.optString("duration", movie.duration ?: "")
+                        info.optString("duration", targetMovie.duration ?: "")
                     }
-                    val genre = info.optString("genre", movie.genre ?: movie.category)
+                    val genre = info.optString("genre", targetMovie.genre ?: targetMovie.category)
                     val rating = if (info.has("rating_5based")) {
                         "${info.optDouble("rating_5based", 0.0)}/5"
                     } else if (info.has("rating") && !info.isNull("rating")) {
                         "${info.optString("rating")}/10"
-                    } else movie.rating
+                    } else targetMovie.rating
                     var backdrop: String? = null
                     if (info.has("backdrop_path")) {
                         val bArray = info.optJSONArray("backdrop_path")
@@ -1061,14 +1503,14 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
                     val cleanCast = rawCast.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
                     val cleanDuration = rawDuration.takeIf { !it.contains("redecanais", ignoreCase = true) && it.isNotBlank() }
 
-                    currentUpdated = movie.copy(
-                        description = if (plot.isNotBlank()) plot else movie.description,
-                        director = cleanDirector ?: movie.director,
-                        cast = cleanCast ?: movie.cast,
-                        duration = cleanDuration ?: movie.duration,
-                        genre = if (genre.isNotBlank()) genre else movie.genre,
-                        rating = rating ?: movie.rating,
-                        backdropUrl = backdrop ?: movie.backdropUrl
+                    currentUpdated = targetMovie.copy(
+                        description = if (plot.isNotBlank()) plot else targetMovie.description,
+                        director = cleanDirector ?: targetMovie.director,
+                        cast = cleanCast ?: targetMovie.cast,
+                        duration = cleanDuration ?: targetMovie.duration,
+                        genre = if (genre.isNotBlank()) genre else targetMovie.genre,
+                        rating = rating ?: targetMovie.rating,
+                        backdropUrl = backdrop ?: targetMovie.backdropUrl
                     )
                 }
             }

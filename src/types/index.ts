@@ -57,6 +57,7 @@ export interface MovieItem {
   name: string;
   streamUrl: string;
   posterUrl?: string;
+  backdropUrl?: string;
   category: string;
   year?: string;
   duration?: string;
@@ -89,6 +90,7 @@ export interface SeriesItem {
   playlistId: string;
   name: string;
   posterUrl?: string;
+  backdropUrl?: string;
   category: string;
   year?: string;
   genre?: string;

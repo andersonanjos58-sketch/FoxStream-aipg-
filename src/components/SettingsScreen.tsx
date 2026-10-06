@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { 
   Settings, PlaySquare, RefreshCw, Trash2, ShieldAlert, 
-  Info, ExternalLink, Check, Server, HardDrive, Smartphone, Upload, Image as ImageIcon, Loader2
+  Info, ExternalLink, Check, Server, HardDrive, Smartphone, Upload, Image as ImageIcon, Loader2,
+  Github, GitBranch, Download, Send, Terminal, AlertCircle
 } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import logoImage from '../assets/images/foxstream_logo_new_1790894733124.jpg';
@@ -25,6 +26,43 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [uploadMessage, setUploadMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // GitHub Push State
+  const [githubRepoUrl, setGithubRepoUrl] = useState('');
+  const [githubToken, setGithubToken] = useState('');
+  const [githubBranch, setGithubBranch] = useState('main');
+  const [pushStatus, setPushStatus] = useState<'idle' | 'pushing' | 'success' | 'error'>('idle');
+  const [pushMessage, setPushMessage] = useState('');
+
+  const handlePushToGithub = async () => {
+    if (!githubRepoUrl.trim()) {
+      setPushStatus('error');
+      setPushMessage('Por favor, digite a URL do repositório no GitHub (ex: https://github.com/usuario/foxstream.git)');
+      return;
+    }
+    setPushStatus('pushing');
+    setPushMessage('Configurando repositório remoto e enviando código...');
+    try {
+      const res = await fetch('/api/github/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoUrl: githubRepoUrl.trim(),
+          token: githubToken.trim() || undefined,
+          branch: githubBranch.trim() || 'main'
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Falha ao subir para o GitHub');
+      }
+      setPushStatus('success');
+      setPushMessage(data.message || 'Código enviado com sucesso para o GitHub! O GitHub Actions foi iniciado.');
+    } catch (err: any) {
+      setPushStatus('error');
+      setPushMessage(err.message || 'Erro ao enviar para o GitHub.');
+    }
+  };
 
   const handleLogoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -309,6 +347,111 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <span>{uploadMessage}</span>
           </div>
         )}
+      </div>
+
+      {/* Group: Subir para o GitHub & Exportação do Projeto */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-blue-950/20 via-[#11131b] to-neutral-900 border border-blue-500/30 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-blue-400">
+            <Github className="w-5 h-5" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+              Subir para o GitHub & Gerar APK (CI/CD)
+            </h3>
+          </div>
+          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
+            <GitBranch className="w-3 h-3" /> Branch: main
+          </span>
+        </div>
+
+        <p className="text-xs text-neutral-400 leading-relaxed">
+          O repositório Git local está configurado com todos os arquivos Android nativos (Kotlin & Jetpack Compose), ícones oficiais e o fluxo <strong>GitHub Actions</strong> (<code className="text-blue-300">.github/workflows/android.yml</code>) pronto para compilar o APK automaticamente na nuvem ao receber o push.
+        </p>
+
+        <div className="space-y-3 bg-neutral-900/80 p-4 rounded-2xl border border-neutral-800">
+          <div>
+            <label className="block text-[11px] font-bold text-neutral-300 mb-1.5">
+              URL do Repositório GitHub
+            </label>
+            <input
+              type="text"
+              placeholder="https://github.com/seu-usuario/foxstream.git"
+              value={githubRepoUrl}
+              onChange={(e) => setGithubRepoUrl(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-700 text-neutral-200 text-xs focus:outline-none focus:border-blue-500 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-neutral-300 mb-1.5">
+              Personal Access Token (PAT) do GitHub <span className="text-neutral-500 font-normal">(Opcional se público; obrigatório se privado)</span>
+            </label>
+            <input
+              type="password"
+              placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-700 text-neutral-200 text-xs focus:outline-none focus:border-blue-500 font-mono"
+            />
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-2">
+            <button
+              type="button"
+              disabled={pushStatus === 'pushing'}
+              onClick={handlePushToGithub}
+              className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-5 rounded-2xl text-xs shadow-lg shadow-blue-950/40 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {pushStatus === 'pushing' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Subindo para o GitHub...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>Subir para o GitHub Agora (git push)</span>
+                </>
+              )}
+            </button>
+
+            <a
+              href="/foxstream-source.zip"
+              download="foxstream-source.zip"
+              className="flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-bold py-3 px-4 rounded-2xl text-xs border border-neutral-700 transition-colors"
+            >
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span>Baixar Projeto (.ZIP)</span>
+            </a>
+          </div>
+
+          {pushMessage && (
+            <div className={`p-3 rounded-2xl text-xs flex items-center gap-2 ${
+              pushStatus === 'success'
+                ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-300'
+                : pushStatus === 'error'
+                ? 'bg-rose-500/20 border border-rose-500/30 text-rose-300'
+                : 'bg-blue-500/20 border border-blue-500/30 text-blue-300'
+            }`}>
+              {pushStatus === 'success' && <Check className="w-4 h-4 shrink-0 text-emerald-400" />}
+              {pushStatus === 'error' && <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />}
+              {pushStatus === 'pushing' && <Loader2 className="w-4 h-4 shrink-0 animate-spin text-blue-400" />}
+              <span>{pushMessage}</span>
+            </div>
+          )}
+
+          {/* Quick terminal instructions */}
+          <div className="pt-2 border-t border-neutral-800/80">
+            <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 font-mono mb-1.5">
+              <Terminal className="w-3.5 h-3.5 text-neutral-500" />
+              <span>Ou envie manualmente pelo seu terminal:</span>
+            </div>
+            <pre className="text-[10px] bg-neutral-950 p-2.5 rounded-xl border border-neutral-800/80 text-neutral-400 overflow-x-auto font-mono leading-relaxed">
+{`git remote add origin https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git
+git branch -M main
+git push -u origin main`}
+            </pre>
+          </div>
+        </div>
       </div>
 
       {/* Group 4: Informações do Aplicativo & Código Android */}

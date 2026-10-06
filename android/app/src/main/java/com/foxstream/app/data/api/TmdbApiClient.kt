@@ -2,6 +2,7 @@ package com.foxstream.app.data.api
 
 import android.util.Log
 import com.foxstream.app.BuildConfig
+import com.foxstream.app.util.SmartMatch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -38,7 +39,7 @@ object TmdbApiClient {
 
     private val cache = ConcurrentHashMap<String, TmdbResult>()
 
-    suspend fun getTrendingMovies(): List<TmdbResult> = withContext(Dispatchers.IO) {
+    private suspend fun fetchTmdbList(endpoint: String, isTv: Boolean): List<TmdbResult> = withContext(Dispatchers.IO) {
         val list = mutableListOf<TmdbResult>()
         try {
             val (apiKey, token) = getAuthCredentials()
@@ -47,7 +48,8 @@ object TmdbApiClient {
                 return@withContext emptyList()
             }
 
-            val url = "$BASE_URL/trending/movie/week?language=pt-BR"
+            val separator = if (endpoint.contains("?")) "&" else "?"
+            val url = "$BASE_URL/$endpoint${separator}language=pt-BR"
             val json = fetchJson(url, apiKey, token) ?: return@withContext emptyList()
             val results = json.optJSONArray("results") ?: return@withContext emptyList()
 
@@ -56,9 +58,10 @@ object TmdbApiClient {
                 val id = item.optInt("id", 0)
                 if (id <= 0) continue
 
-                val title = item.optString("title", null)?.takeIf { it.isNotBlank() }
-                val origTitle = item.optString("original_title", null)?.takeIf { it.isNotBlank() }
-                val releaseDate = item.optString("release_date", null)
+                val title = (if (isTv) item.optString("name", null) else item.optString("title", null))?.takeIf { it.isNotBlank() }
+                val origTitle = (if (isTv) item.optString("original_name", null) else item.optString("original_title", null))?.takeIf { it.isNotBlank() }
+                val dateField = if (isTv) "first_air_date" else "release_date"
+                val releaseDate = item.optString(dateField, null)
                 val year = releaseDate?.take(4)?.takeIf { it.isNotBlank() }
                 val plot = item.optString("overview", null)?.takeIf { it.isNotBlank() }
                 val posterPath = item.optString("poster_path", null)?.takeIf { it.isNotBlank() && it != "null" }
@@ -80,57 +83,20 @@ object TmdbApiClient {
                 ))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching trending movies from TMDb: ${e.message}", e)
+            Log.e(TAG, "Error fetching TMDb list from $endpoint: ${e.message}", e)
         }
         list
     }
 
-    suspend fun getTrendingTv(): List<TmdbResult> = withContext(Dispatchers.IO) {
-        val list = mutableListOf<TmdbResult>()
-        try {
-            val (apiKey, token) = getAuthCredentials()
-            if (apiKey.isBlank() && token.isBlank()) {
-                Log.w(TAG, "TMDb API Key / Token is blank")
-                return@withContext emptyList()
-            }
+    suspend fun getTrendingMovies(): List<TmdbResult> = fetchTmdbList("trending/movie/week", isTv = false)
 
-            val url = "$BASE_URL/trending/tv/week?language=pt-BR"
-            val json = fetchJson(url, apiKey, token) ?: return@withContext emptyList()
-            val results = json.optJSONArray("results") ?: return@withContext emptyList()
+    suspend fun getTrendingTv(): List<TmdbResult> = fetchTmdbList("trending/tv/week", isTv = true)
 
-            for (i in 0 until results.length()) {
-                val item = results.getJSONObject(i)
-                val id = item.optInt("id", 0)
-                if (id <= 0) continue
+    suspend fun getPopularMovies(): List<TmdbResult> = fetchTmdbList("movie/popular", isTv = false)
 
-                val title = item.optString("name", null)?.takeIf { it.isNotBlank() }
-                val origTitle = item.optString("original_name", null)?.takeIf { it.isNotBlank() }
-                val firstAirDate = item.optString("first_air_date", null)
-                val year = firstAirDate?.take(4)?.takeIf { it.isNotBlank() }
-                val plot = item.optString("overview", null)?.takeIf { it.isNotBlank() }
-                val posterPath = item.optString("poster_path", null)?.takeIf { it.isNotBlank() && it != "null" }
-                val poster = posterPath?.let { "$POSTER_BASE_URL$it" }
-                val backdropPath = item.optString("backdrop_path", null)?.takeIf { it.isNotBlank() && it != "null" }
-                val backdrop = backdropPath?.let { "$BACKDROP_BASE_URL$it" }
-                val voteAvg = item.optDouble("vote_average", 0.0)
-                val rating = if (voteAvg > 0.0) String.format(Locale.US, "%.1f/10", voteAvg) else null
+    suspend fun getPopularTv(): List<TmdbResult> = fetchTmdbList("tv/popular", isTv = true)
 
-                list.add(TmdbResult(
-                    title = title,
-                    originalTitle = origTitle,
-                    year = year,
-                    plot = plot,
-                    poster = poster,
-                    backdrop = backdrop,
-                    rating = rating,
-                    tmdbId = id
-                ))
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching trending TV from TMDb: ${e.message}", e)
-        }
-        list
-    }
+    suspend fun getNowPlayingMovies(): List<TmdbResult> = fetchTmdbList("movie/now_playing", isTv = false)
 
     fun normalizeTitle(rawTitle: String): Pair<String, String?> {
         var title = rawTitle.trim()
@@ -314,10 +280,35 @@ object TmdbApiClient {
         val results = json.optJSONArray("results") ?: return null
         if (results.length() == 0) return null
 
-        val tmdbId = results.getJSONObject(0).optInt("id", 0)
-        if (tmdbId <= 0) return null
+        var bestId: Int? = null
+        var bestScore = 79
 
-        return fetchMovieDetails(tmdbId, apiKey, token)
+        for (i in 0 until minOf(results.length(), 6)) {
+            val item = results.getJSONObject(i)
+            val id = item.optInt("id", 0)
+            if (id <= 0) continue
+            val itemTitle = item.optString("title", "")
+            val itemOrigTitle = item.optString("original_title", "")
+            val itemYear = item.optString("release_date", "").take(4)
+
+            val match = SmartMatch.evaluateMatch(
+                localRawName = title,
+                localCategory = "Filmes",
+                localRawYear = year,
+                tmdbTitle = itemTitle,
+                tmdbOriginalTitle = itemOrigTitle,
+                tmdbYear = itemYear
+            )
+
+            if (match.isMatch && match.score > bestScore) {
+                bestScore = match.score
+                bestId = id
+                if (bestScore >= 95) break
+            }
+        }
+
+        val finalId = bestId ?: results.getJSONObject(0).optInt("id", 0).takeIf { it > 0 } ?: return null
+        return fetchMovieDetails(finalId, apiKey, token)
     }
 
     private fun searchTv(title: String, year: String?, apiKey: String, token: String): TmdbResult? {
@@ -329,10 +320,35 @@ object TmdbApiClient {
         val results = json.optJSONArray("results") ?: return null
         if (results.length() == 0) return null
 
-        val tmdbId = results.getJSONObject(0).optInt("id", 0)
-        if (tmdbId <= 0) return null
+        var bestId: Int? = null
+        var bestScore = 79
 
-        return fetchTvDetails(tmdbId, apiKey, token)
+        for (i in 0 until minOf(results.length(), 6)) {
+            val item = results.getJSONObject(i)
+            val id = item.optInt("id", 0)
+            if (id <= 0) continue
+            val itemTitle = item.optString("name", "")
+            val itemOrigTitle = item.optString("original_name", "")
+            val itemYear = item.optString("first_air_date", "").take(4)
+
+            val match = SmartMatch.evaluateMatch(
+                localRawName = title,
+                localCategory = "Séries",
+                localRawYear = year,
+                tmdbTitle = itemTitle,
+                tmdbOriginalTitle = itemOrigTitle,
+                tmdbYear = itemYear
+            )
+
+            if (match.isMatch && match.score > bestScore) {
+                bestScore = match.score
+                bestId = id
+                if (bestScore >= 95) break
+            }
+        }
+
+        val finalId = bestId ?: results.getJSONObject(0).optInt("id", 0).takeIf { it > 0 } ?: return null
+        return fetchTvDetails(finalId, apiKey, token)
     }
 
     private fun fetchMovieDetails(id: Int, apiKey: String, token: String): TmdbResult? {
@@ -494,9 +510,12 @@ object TmdbApiClient {
         )
     }
 
+    private const val DEFAULT_API_KEY = "6fb6ba516b5df9841c2ac73a2974bbfb"
+    private const val DEFAULT_READ_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI2ZmI2YmE1MTZiNWRmOTg0MWMyYWM3M2EyOTc0YmJmYiIsIm5iZiI6MTc4OTk3NTY0MS4yNTUsInN1YiI6IjZhYjBkYzU5YmJiZGQ4MzdhNmM4YmIxYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.5hLq_cry3Sh_KEKj-_Wo2DGNOFuugz6jjfy3J7ePDMQ"
+
     private fun getAuthCredentials(): Pair<String, String> {
-        val apiKey = try { BuildConfig.TMDB_API_KEY } catch (e: Throwable) { "" }
-        val token = try { BuildConfig.TMDB_READ_ACCESS_TOKEN } catch (e: Throwable) { "" }
+        val apiKey = (try { BuildConfig.TMDB_API_KEY } catch (e: Throwable) { "" }).ifBlank { DEFAULT_API_KEY }
+        val token = (try { BuildConfig.TMDB_READ_ACCESS_TOKEN } catch (e: Throwable) { "" }).ifBlank { DEFAULT_READ_TOKEN }
         return Pair(apiKey, token)
     }
 

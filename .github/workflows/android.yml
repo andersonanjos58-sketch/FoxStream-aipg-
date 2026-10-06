@@ -1,7 +1,14 @@
 name: Build FoxStream APK
 
 on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -31,8 +38,21 @@ jobs:
           ./gradlew clean --no-daemon
           ./gradlew assembleDebug --no-daemon --no-build-cache --stacktrace
 
-      - name: Upload APK
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: foxstream-debug-apks
           path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 1
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-latest
+          name: "FoxStream APK (Build Automático)"
+          body: "Versão compilada do aplicativo FoxStream Android."
+          files: android/app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

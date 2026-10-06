@@ -107,6 +107,95 @@ async function startServer() {
     res.json({ status: 'ok', app: 'FoxStream' });
   });
 
+  // GitHub status check
+  app.get('/api/github/status', async (req, res) => {
+    try {
+      const { execSync } = await import('child_process');
+      const remote = execSync('git remote get-url origin 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+      const branch = execSync('git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main"', { encoding: 'utf-8' }).trim();
+      const commitCount = execSync('git rev-list --count HEAD 2>/dev/null || echo "0"', { encoding: 'utf-8' }).trim();
+      const lastCommit = execSync('git log -1 --pretty=format:"%h - %s (%cr)" 2>/dev/null || true', { encoding: 'utf-8' }).trim();
+      res.json({
+        initialized: true,
+        branch,
+        remote: remote ? remote.replace(/https:\/\/[^@]+@/, 'https://') : null,
+        commitCount: parseInt(commitCount, 10) || 0,
+        lastCommit
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GitHub push endpoint
+  app.post('/api/github/push', async (req, res) => {
+    try {
+      const { repoUrl, token, branch = 'main' } = req.body;
+      if (!repoUrl) {
+        return res.status(400).json({ error: 'URL do repositório é obrigatória (ex: https://github.com/usuario/foxstream.git)' });
+      }
+
+      let formattedUrl = repoUrl.trim();
+      if (!formattedUrl.endsWith('.git')) {
+        formattedUrl += '.git';
+      }
+
+      // If token is provided, embed it into the HTTPS URL
+      if (token && token.trim()) {
+        const cleanToken = token.trim();
+        formattedUrl = formattedUrl.replace(/^https:\/\//, `https://${cleanToken}@`);
+      }
+
+      const { execSync } = await import('child_process');
+
+      // Make sure all changes are committed
+      try {
+        execSync('git add -A && (git commit -m "chore: sync project before push" || true)', { cwd: process.cwd() });
+      } catch {}
+
+      // Update or set origin remote
+      try {
+        execSync('git remote remove origin 2>/dev/null || true', { cwd: process.cwd() });
+        execSync(`git remote add origin ${formattedUrl}`, { cwd: process.cwd() });
+      } catch (e: any) {
+        return res.status(500).json({ error: `Falha ao configurar remote origin: ${e.message}` });
+      }
+
+      // Push to GitHub
+      try {
+        const pushOutput = execSync(`git push -u origin ${branch} --force`, {
+          cwd: process.cwd(),
+          encoding: 'utf-8',
+          timeout: 60000
+        });
+        return res.json({
+          success: true,
+          message: 'Projeto enviado com sucesso para o GitHub! O workflow GitHub Actions foi acionado para gerar o APK.',
+          output: pushOutput
+        });
+      } catch (pushErr: any) {
+        const msg = pushErr.stderr || pushErr.message || 'Erro desconhecido ao executar git push';
+        // Clean out any token in error message for security
+        const safeMsg = msg.replace(/https:\/\/[^@]+@/g, 'https://***@');
+        return res.status(500).json({ error: safeMsg });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Re-generate and download full source ZIP archive
+  app.get('/api/download-zip', async (req, res) => {
+    try {
+      const { execSync } = await import('child_process');
+      const zipPath = path.join(process.cwd(), 'public', 'foxstream-source.zip');
+      execSync(`git archive --format=zip HEAD -o "${zipPath}"`, { cwd: process.cwd() });
+      res.download(zipPath, 'foxstream-source.zip');
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // CORS Proxy endpoint for Xtream Codes & M3U URLs
   app.get('/api/proxy', async (req, res) => {
     // Extract full target URL even if it has unencoded query parameters like ?username=...&password=...

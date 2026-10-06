@@ -11,7 +11,10 @@ coverage/
 android-sdk/
 jdk-17/
 .gradle/
+.kotlin/
+*.salive
 android/app/build/
 android/.gradle/
 local.properties
 .idea/
+*.zip
