@@ -9,6 +9,7 @@ interface SeriesScreenProps {
   onToggleFavorite: (series: SeriesItem) => void;
   isFavorite: (id: string) => boolean;
   onOpenAddPlaylist: () => void;
+  onOpenSearch: () => void;
 }
 
 export const SeriesScreen: React.FC<SeriesScreenProps> = ({
@@ -17,7 +18,8 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
   onSelectSeries,
   onToggleFavorite,
   isFavorite,
-  onOpenAddPlaylist
+  onOpenAddPlaylist,
+  onOpenSearch
 }) => {
   const seriesList = series || propSeriesList || [];
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -145,7 +147,7 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
           onMouseLeave={() => setIsFeaturedPaused(false)}
           onTouchStart={() => setIsFeaturedPaused(true)}
           onTouchEnd={() => setIsFeaturedPaused(false)}
-          className="relative w-full h-48 sm:h-64 md:h-[300px] rounded-none overflow-hidden bg-black select-none border-b border-neutral-900"
+          className="relative w-full h-28 sm:h-36 md:h-[180px] rounded-none overflow-hidden bg-black select-none border-b border-neutral-900"
         >
           {(() => {
             const currentItem = featuredSeries[currentFeaturedIndex] || featuredSeries[0];
@@ -174,32 +176,32 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
                 <div className="absolute inset-0 bg-gradient-to-r from-[#080a10] via-[#080a10]/50 to-transparent pointer-events-none" />
 
                 {/* Textos e elementos sobrepostos */}
-                <div className="absolute bottom-6 sm:bottom-10 left-4 sm:left-10 right-4 sm:right-10 max-w-3xl space-y-2 sm:space-y-3 z-10">
+                <div className="absolute bottom-3 sm:bottom-6 left-4 sm:left-10 right-4 sm:right-10 max-w-3xl space-y-1 sm:space-y-1.5 z-10">
                   {/* Tags */}
-                  <div className="text-xs sm:text-sm font-bold text-rose-400 tracking-wide">
+                  <div className="text-[10px] sm:text-xs font-bold text-rose-400 tracking-wide">
                     {tagString}
                   </div>
 
                   {/* Título */}
-                  <h1 className="text-2xl sm:text-4xl md:text-5xl font-black text-white font-['Outfit'] tracking-tight line-clamp-2 drop-shadow-md">
+                  <h1 className="text-lg sm:text-2xl md:text-3xl font-black text-white font-['Outfit'] tracking-tight line-clamp-1 drop-shadow-md">
                     {currentItem.name}
                   </h1>
 
                   {/* Sinopse resumida se disponível */}
                   {currentItem.description && (
-                    <p className="text-xs sm:text-sm text-neutral-300 line-clamp-2 max-w-2xl drop-shadow">
+                    <p className="hidden sm:block text-[11px] sm:text-xs text-neutral-300 line-clamp-1 max-w-2xl drop-shadow">
                       {currentItem.description}
                     </p>
                   )}
 
                   {/* Botão branco "Assistir" com ícone e texto pretos */}
-                  <div className="pt-2 flex items-center gap-4">
+                  <div className="pt-0.5 flex items-center gap-4">
                     <button
                       type="button"
                       onClick={() => onSelectSeries(currentItem)}
-                      className="bg-white hover:bg-neutral-200 active:scale-95 text-black font-bold px-7 py-2.5 sm:py-3 rounded-full flex items-center gap-2 text-xs sm:text-sm shadow-xl transition-all cursor-pointer"
+                      className="bg-white hover:bg-neutral-200 active:scale-95 text-black font-bold px-4 py-1.5 sm:py-2 rounded-full flex items-center gap-1.5 text-[10px] sm:text-xs shadow-xl transition-all cursor-pointer"
                     >
-                      <Play className="w-4 h-4 fill-black text-black" />
+                      <Play className="w-3 h-3 fill-black text-black" />
                       <span>Assistir</span>
                     </button>
                   </div>
@@ -207,7 +209,7 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
 
                 {/* Pager Dots no canto inferior direito */}
                 {featuredSeries.length > 1 && (
-                  <div className="absolute bottom-5 sm:bottom-8 right-4 sm:right-10 flex items-center gap-1.5 z-20">
+                  <div className="absolute bottom-3 sm:bottom-6 right-4 sm:right-10 flex items-center gap-1.5 z-20">
                     {featuredSeries.map((_, idx) => (
                       <button
                         key={`spotlight_dot_${idx}`}
@@ -325,26 +327,15 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
             </button>
           )}
 
-          {/* Elemento 2: Barra de busca escura arredondada que se expande */}
-          <div className="relative flex-1">
-            <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-4 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Buscar em todas as séries..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#121520] border border-neutral-800 rounded-full pl-10 pr-10 h-10 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-rose-500 transition-colors shadow-inner"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+          {/* Elemento 2: Barra de busca como botão que abre o ambiente de busca e ativa o teclado */}
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            className="flex-1 flex items-center gap-2 bg-[#121520] border border-neutral-800 hover:border-neutral-700 rounded-full pl-4 pr-10 h-10 text-xs text-neutral-400 cursor-pointer text-left transition-colors shadow-inner"
+          >
+            <Search className="w-3.5 h-3.5 text-neutral-400" />
+            <span>Buscar em todas as séries...</span>
+          </button>
         </div>
 
         {/* 3. CONTEÚDO PRINCIPAL */}

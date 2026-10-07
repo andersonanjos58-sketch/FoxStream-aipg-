@@ -364,7 +364,8 @@ fun FoxStreamApp(
                         },
                         onToggleFavorite = { movie ->
                             viewModel.toggleFavoriteMovie(movie)
-                        }
+                        },
+                        onTriggerSearch = { showSearchScreen = true }
                     )
                     AppNavTab.SERIES -> SeriesScreen(
                         seriesList = seriesList,
@@ -376,7 +377,8 @@ fun FoxStreamApp(
                         },
                         onLoadDetails = { s, callback ->
                             viewModel.getSeriesDetailsOnDemand(s, callback)
-                        }
+                        },
+                        onTriggerSearch = { showSearchScreen = true }
                     )
                     AppNavTab.FAVORITES -> FavoritesScreen(
                         favorites = favorites,

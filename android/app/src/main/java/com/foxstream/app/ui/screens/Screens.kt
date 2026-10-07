@@ -483,7 +483,7 @@ fun SpotlightBannerCarousel(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp) // Largura total 100%, mais retangular na horizontal (reduzido ~30%)
+            .height(135.dp) // Largura total 100%, mais retangular na horizontal (reduzido mais 30% conforme solicitado)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -541,7 +541,7 @@ fun SpotlightBannerCarousel(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
                 ) {
                     // Tags: "FILME • ★ 0.0/5 • ★RC | Dublado | Drama"
                     val ratingStr = item.movieItem?.rating ?: item.seriesItem?.rating
@@ -570,7 +570,7 @@ fun SpotlightBannerCarousel(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     // Botão branco "Assistir" com ícone e texto pretos
                     Button(
@@ -588,20 +588,20 @@ fun SpotlightBannerCarousel(
                             contentColor = Color.Black
                         ),
                         shape = RoundedCornerShape(24.dp),
-                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
-                        modifier = Modifier.height(38.dp)
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = null,
                             tint = Color.Black,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "Assistir",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = Color.Black
                         )
                     }
@@ -614,7 +614,7 @@ fun SpotlightBannerCarousel(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 22.dp),
+                    .padding(end = 16.dp, bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1676,7 +1676,8 @@ fun MoviesScreen(
     onPlay: (String, String, ContentType) -> Unit,
     onOpenMovie: (MovieItem) -> Unit = {},
     onToggleFavorite: (MovieItem) -> Unit,
-    favorites: List<FavoriteItem> = emptyList()
+    favorites: List<FavoriteItem> = emptyList(),
+    onTriggerSearch: () -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var debouncedSearchQuery by remember { mutableStateOf("") }
@@ -1872,29 +1873,32 @@ fun MoviesScreen(
                 }
             }
 
-            // Elemento 2: Barra de busca escura que expande no espaço horizontal restante
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Buscar em todos os filmes...", fontSize = 11.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(16.dp)) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray, modifier = Modifier.size(14.dp))
-                        }
-                    }
-                },
-                modifier = Modifier.weight(1f).height(48.dp),
-                singleLine = true,
+            // Elemento 2: Barra de busca estática como botão clicável que abre a busca global instantaneamente
+            Surface(
+                onClick = { onTriggerSearch() },
+                modifier = Modifier.weight(1f).height(46.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = OrangePrimary,
-                    unfocusedBorderColor = Color(0xFF2D3245),
-                    focusedContainerColor = Color(0xFF141722),
-                    unfocusedContainerColor = Color(0xFF141722)
-                )
-            )
+                color = Color(0xFF141722),
+                border = BorderStroke(1.dp, Color(0xFF2D3245))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Buscar em todos os filmes...",
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
         }
 
         // ÁREA DE CONTEÚDO DINÂMICA
@@ -3099,7 +3103,8 @@ fun SeriesScreen(
     onLoadDetails: (SeriesItem, (List<SeasonItem>) -> Unit) -> Unit,
     initialSeries: SeriesItem? = null,
     onClearInitialSeries: () -> Unit = {},
-    history: List<HistoryItem> = emptyList()
+    history: List<HistoryItem> = emptyList(),
+    onTriggerSearch: () -> Unit = {}
 ) {
     var selectedSeries by remember { mutableStateOf<SeriesItem?>(initialSeries) }
     var searchQuery by remember { mutableStateOf("") }
@@ -3321,29 +3326,32 @@ fun SeriesScreen(
                 }
             }
 
-            // Elemento 2: Barra de busca escura que expande no espaço horizontal restante
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Buscar em todas as séries...", fontSize = 11.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(16.dp)) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray, modifier = Modifier.size(14.dp))
-                        }
-                    }
-                },
-                modifier = Modifier.weight(1f).height(48.dp),
-                singleLine = true,
+            // Elemento 2: Barra de busca estática como botão clicável que abre a busca global instantaneamente
+            Surface(
+                onClick = { onTriggerSearch() },
+                modifier = Modifier.weight(1f).height(46.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = OrangePrimary,
-                    unfocusedBorderColor = Color(0xFF2D3245),
-                    focusedContainerColor = Color(0xFF141722),
-                    unfocusedContainerColor = Color(0xFF141722)
-                )
-            )
+                color = Color(0xFF141722),
+                border = BorderStroke(1.dp, Color(0xFF2D3245))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Buscar em todas as séries...",
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
         }
 
         // ÁREA DE CONTEÚDO DINÂMICA

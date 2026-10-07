@@ -581,6 +581,7 @@ export default function App() {
               onToggleFavorite={(m) => handleToggleFavorite(m, 'movie')}
               isFavorite={isFavorite}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+              onOpenSearch={() => setIsSearchOpen(true)}
             />
           </div>
         )}
@@ -593,6 +594,7 @@ export default function App() {
               onToggleFavorite={(s) => handleToggleFavorite(s, 'series')}
               isFavorite={isFavorite}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+              onOpenSearch={() => setIsSearchOpen(true)}
             />
           </div>
         )}
