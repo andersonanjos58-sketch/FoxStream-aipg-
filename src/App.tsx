@@ -34,6 +34,16 @@ import { evaluateSmartMatch } from './services/tmdbService';
 export default function App() {
   // Navigation
   const [currentTab, setCurrentTab] = useState<NavTab>('home');
+  const [visitedTabs, setVisitedTabs] = useState<Set<NavTab>>(() => new Set(['home']));
+
+  useEffect(() => {
+    setVisitedTabs(prev => {
+      if (prev.has(currentTab)) return prev;
+      const next = new Set(prev);
+      next.add(currentTab);
+      return next;
+    });
+  }, [currentTab]);
 
   // Playlists & Content Data
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -529,97 +539,111 @@ export default function App() {
         isRefreshing={!!refreshingPlaylistId}
       />
 
-      {/* Main Screen Views */}
+      {/* Main Screen Views with Keep-Alive to eliminate tab switching stutter */}
       <main className="flex-1 w-full">
-        {currentTab === 'home' && (
-          <HomeScreen
-            activePlaylist={activePlaylist}
-            history={history}
-            favorites={favorites}
-            channels={channels}
-            movies={movies}
-            series={series}
-            onPlayChannel={handlePlayChannel}
-            onSelectMovie={setSelectedMovie}
-            onSelectSeries={setSelectedSeries}
-            onPlayHistoryItem={handlePlayHistory}
-            onRemoveHistoryItem={handleRemoveHistory}
-            onNavigateTab={setCurrentTab}
-            onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-          />
+        {visitedTabs.has('home') && (
+          <div className={currentTab === 'home' ? 'w-full' : 'hidden'}>
+            <HomeScreen
+              activePlaylist={activePlaylist}
+              history={history}
+              favorites={favorites}
+              channels={channels}
+              movies={movies}
+              series={series}
+              onPlayChannel={handlePlayChannel}
+              onSelectMovie={setSelectedMovie}
+              onSelectSeries={setSelectedSeries}
+              onPlayHistoryItem={handlePlayHistory}
+              onRemoveHistoryItem={handleRemoveHistory}
+              onNavigateTab={setCurrentTab}
+              onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+            />
+          </div>
         )}
 
-        {currentTab === 'live' && (
-          <LiveTvScreen
-            channels={channels}
-            onPlayChannel={handlePlayChannel}
-            onToggleFavorite={(c) => handleToggleFavorite(c, 'live')}
-            isFavorite={isFavorite}
-            onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-          />
+        {visitedTabs.has('live') && (
+          <div className={currentTab === 'live' ? 'w-full' : 'hidden'}>
+            <LiveTvScreen
+              channels={channels}
+              onPlayChannel={handlePlayChannel}
+              onToggleFavorite={(c) => handleToggleFavorite(c, 'live')}
+              isFavorite={isFavorite}
+              onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+            />
+          </div>
         )}
 
-        {currentTab === 'movies' && (
-          <MoviesScreen
-            movies={movies}
-            onSelectMovie={setSelectedMovie}
-            onToggleFavorite={(m) => handleToggleFavorite(m, 'movie')}
-            isFavorite={isFavorite}
-            onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-          />
+        {visitedTabs.has('movies') && (
+          <div className={currentTab === 'movies' ? 'w-full' : 'hidden'}>
+            <MoviesScreen
+              movies={movies}
+              onSelectMovie={setSelectedMovie}
+              onToggleFavorite={(m) => handleToggleFavorite(m, 'movie')}
+              isFavorite={isFavorite}
+              onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+            />
+          </div>
         )}
 
-        {currentTab === 'series' && (
-          <SeriesScreen
-            series={series}
-            onSelectSeries={setSelectedSeries}
-            onToggleFavorite={(s) => handleToggleFavorite(s, 'series')}
-            isFavorite={isFavorite}
-            onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-          />
+        {visitedTabs.has('series') && (
+          <div className={currentTab === 'series' ? 'w-full' : 'hidden'}>
+            <SeriesScreen
+              series={series}
+              onSelectSeries={setSelectedSeries}
+              onToggleFavorite={(s) => handleToggleFavorite(s, 'series')}
+              isFavorite={isFavorite}
+              onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+            />
+          </div>
         )}
 
-        {currentTab === 'favorites' && (
-          <FavoritesScreen
-            favorites={favorites}
-            channels={channels}
-            movies={movies}
-            series={series}
-            onPlayChannel={handlePlayChannel}
-            onSelectMovie={setSelectedMovie}
-            onSelectSeries={setSelectedSeries}
-            onRemoveFavorite={(fav) => {
-              const updated = StorageService.toggleFavorite(fav);
-              setFavorites(updated);
-            }}
-            onNavigateHome={() => setCurrentTab('home')}
-          />
+        {visitedTabs.has('favorites') && (
+          <div className={currentTab === 'favorites' ? 'w-full' : 'hidden'}>
+            <FavoritesScreen
+              favorites={favorites}
+              channels={channels}
+              movies={movies}
+              series={series}
+              onPlayChannel={handlePlayChannel}
+              onSelectMovie={setSelectedMovie}
+              onSelectSeries={setSelectedSeries}
+              onRemoveFavorite={(fav) => {
+                const updated = StorageService.toggleFavorite(fav);
+                setFavorites(updated);
+              }}
+              onNavigateHome={() => setCurrentTab('home')}
+            />
+          </div>
         )}
 
-        {currentTab === 'playlists' && (
-          <PlaylistsScreen
-            playlists={playlists}
-            activePlaylistId={activePlaylistId}
-            onSelectPlaylist={handleSelectPlaylist}
-            onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-            onRefreshPlaylist={handleRefreshPlaylist}
-            onDeletePlaylist={handleDeletePlaylist}
-            onRenamePlaylist={handleRenamePlaylist}
-            refreshingId={refreshingPlaylistId}
-          />
+        {visitedTabs.has('playlists') && (
+          <div className={currentTab === 'playlists' ? 'w-full' : 'hidden'}>
+            <PlaylistsScreen
+              playlists={playlists}
+              activePlaylistId={activePlaylistId}
+              onSelectPlaylist={handleSelectPlaylist}
+              onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+              onRefreshPlaylist={handleRefreshPlaylist}
+              onDeletePlaylist={handleDeletePlaylist}
+              onRenamePlaylist={handleRenamePlaylist}
+              refreshingId={refreshingPlaylistId}
+            />
+          </div>
         )}
 
-        {currentTab === 'settings' && (
-          <SettingsScreen
-            onNavigatePlaylists={() => setCurrentTab('playlists')}
-            onRefreshAll={async () => {
-              for (const p of playlists) {
-                await handleRefreshPlaylist(p);
-              }
-            }}
-            onClearCache={handleClearCache}
-            onOpenAndroidSource={() => setIsAndroidModalOpen(true)}
-          />
+        {visitedTabs.has('settings') && (
+          <div className={currentTab === 'settings' ? 'w-full' : 'hidden'}>
+            <SettingsScreen
+              onNavigatePlaylists={() => setCurrentTab('playlists')}
+              onRefreshAll={async () => {
+                for (const p of playlists) {
+                  await handleRefreshPlaylist(p);
+                }
+              }}
+              onClearCache={handleClearCache}
+              onOpenAndroidSource={() => setIsAndroidModalOpen(true)}
+            />
+          </div>
         )}
       </main>
 

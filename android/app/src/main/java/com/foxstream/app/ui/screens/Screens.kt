@@ -1728,11 +1728,11 @@ fun MoviesScreen(
             }
     }
 
-    // Global Search across entire movie catalog
-    val searchResults = remember(debouncedSearchQuery, movies) {
-        if (debouncedSearchQuery.isBlank()) emptyList()
+    // Global Search across entire movie catalog (Instant, on-the-fly as user types!)
+    val searchResults = remember(searchQuery, movies) {
+        if (searchQuery.isBlank()) emptyList()
         else {
-            val tokens = SearchUtils.extractTokens(debouncedSearchQuery)
+            val tokens = SearchUtils.extractTokens(searchQuery)
             movies.filter { SearchUtils.matchesAnyField(tokens, it.name, it.category, it.year ?: "") }
         }
     }
@@ -1742,40 +1742,163 @@ fun MoviesScreen(
         selectedCategoryForGrid = null
     }
 
-    // Layout: Spotlight Banner no topo (largura total 100%, 0px bordas),
-    // seguido diretamente pela Busca e botão pílula de Categorias
+    // Layout: 1. Spotlight Banner (only if not searching/grid), 2. Fixed Search Bar & Categories, 3. Dynamic content below
     Column(modifier = Modifier.fillMaxSize()) {
+        // Spotlight Banner em destaque (largura total, 0px bordas retas) - escondido na busca e grade para maximizar espaço de resultados
+        if (searchQuery.isBlank() && selectedCategoryForGrid == null) {
+            if (movieHeroItems.isNotEmpty()) {
+                SpotlightBannerCarousel(
+                    items = movieHeroItems,
+                    onPlay = onPlay,
+                    onOpenSeries = {},
+                    onOpenMovie = onOpenMovie
+                )
+            }
+        }
+
+        // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable para reter o foco e manter o teclado aberto)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Buscar em todos os filmes...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = OrangePrimary,
+                    unfocusedBorderColor = Color(0xFF2D3245),
+                    focusedContainerColor = Color(0xFF141722),
+                    unfocusedContainerColor = Color(0xFF141722)
+                )
+            )
+
+            // Só exibe as categorias/retorno se o usuário não estiver buscando ativamente
+            if (searchQuery.isBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box {
+                        Button(
+                            onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FilterList,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showCategoriesDropdown,
+                            onDismissRequest = { showCategoriesDropdown = false },
+                            modifier = Modifier
+                                .background(Color(0xFF161924))
+                                .widthIn(min = 220.dp, max = 290.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Todas as Categorias (Carrosséis)",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                                    )
+                                },
+                                onClick = {
+                                    selectedCategoryForGrid = null
+                                    showCategoriesDropdown = false
+                                }
+                            )
+                            Divider(color = Color.White.copy(alpha = 0.12f))
+                            allCategoriesList.forEach { cat ->
+                                val count = categoriesMap[cat]?.size ?: 0
+                                val isSelected = selectedCategoryForGrid == cat
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = cat,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                                modifier = Modifier.weight(1f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = Color(0xFF23283B)
+                                            ) {
+                                                Text(
+                                                    text = "$count",
+                                                    fontSize = 10.sp,
+                                                    color = Color.Gray,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedCategoryForGrid = cat
+                                        showCategoriesDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (selectedCategoryForGrid != null) {
+                        TextButton(onClick = { selectedCategoryForGrid = null }) {
+                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ÁREA DE CONTEÚDO DINÂMICA
         if (searchQuery.isNotBlank()) {
             // VIEW 1: SEARCH RESULTS
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp)
             ) {
-                // Barra de busca escura arredondada
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Buscar em todos os filmes...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-                    trailingIcon = {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = OrangePrimary,
-                        unfocusedBorderColor = Color(0xFF2D3245),
-                        focusedContainerColor = Color(0xFF141722),
-                        unfocusedContainerColor = Color(0xFF141722)
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
                 if (searchResults.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(text = "Nenhum filme encontrado para \"$searchQuery\".", color = Color.Gray)
@@ -1814,26 +1937,9 @@ fun MoviesScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp)
             ) {
                 val catMovies = categoriesMap[selectedCategoryForGrid] ?: emptyList()
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "$selectedCategoryForGrid (${catMovies.size} filmes)",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    TextButton(onClick = { selectedCategoryForGrid = null }) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
                 Spacer(modifier = Modifier.height(6.dp))
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
@@ -1855,151 +1961,12 @@ fun MoviesScreen(
                 }
             }
         } else {
-            // VIEW 3: MAIN VIEW
-            // 1. Banner em Destaque (Spotlight Banner): Posicionado diretamente abaixo da barra superior (100% largura, 0px bordas)
-            // 2. Busca e Categorias: Colocados diretamente ABAIXO do banner em destaque
-            // 3. Carrosséis de cada categoria
+            // VIEW 3: MAIN VIEW (Carrosséis por categoria)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Banner em Destaque (Spotlight Banner)
-                if (movieHeroItems.isNotEmpty()) {
-                    item(key = "spotlight_banner") {
-                        SpotlightBannerCarousel(
-                            items = movieHeroItems,
-                            onPlay = onPlay,
-                            onOpenSeries = {},
-                            onOpenMovie = onOpenMovie
-                        )
-                    }
-                }
-
-                // Busca e Categorias (Colocados diretamente ABAIXO do banner em destaque)
-                item(key = "search_and_categories_bar") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
-                    ) {
-                        // Primeiro elemento: Uma barra de busca escura arredondada
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Buscar em todos os filmes...") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = OrangePrimary,
-                                unfocusedBorderColor = Color(0xFF2D3245),
-                                focusedContainerColor = Color(0xFF141722),
-                                unfocusedContainerColor = Color(0xFF141722)
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Segundo elemento: Um botão no formato pílula "Categorias"
-                        Box {
-                            Button(
-                                onClick = { showCategoriesDropdown = !showCategoriesDropdown },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FilterList,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            DropdownMenu(
-                                expanded = showCategoriesDropdown,
-                                onDismissRequest = { showCategoriesDropdown = false },
-                                modifier = Modifier
-                                    .background(Color(0xFF161924))
-                                    .widthIn(min = 220.dp, max = 290.dp)
-                            ) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = "Todas as Categorias (Carrosséis)",
-                                            fontSize = 12.5.sp,
-                                            fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
-                                        )
-                                    },
-                                    onClick = {
-                                        selectedCategoryForGrid = null
-                                        showCategoriesDropdown = false
-                                    }
-                                )
-                                Divider(color = Color.White.copy(alpha = 0.12f))
-                                allCategoriesList.forEach { cat ->
-                                    val count = categoriesMap[cat]?.size ?: 0
-                                    val isSelected = selectedCategoryForGrid == cat
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = cat,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
-                                                    modifier = Modifier.weight(1f),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Surface(
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = Color(0xFF23283B)
-                                                ) {
-                                                    Text(
-                                                        text = "$count",
-                                                        fontSize = 10.sp,
-                                                        color = Color.Gray,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
-                                        },
-                                        onClick = {
-                                            selectedCategoryForGrid = cat
-                                            showCategoriesDropdown = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Carrosséis por categoria
                 categoriesMap.forEach { (catName, catMovies) ->
                     item(key = "cat_$catName") {
                         Column(
@@ -3130,15 +3097,8 @@ fun SeriesScreen(
 ) {
     var selectedSeries by remember { mutableStateOf<SeriesItem?>(initialSeries) }
     var searchQuery by remember { mutableStateOf("") }
-    var debouncedSearchQuery by remember { mutableStateOf("") }
     var selectedCategoryForGrid by remember { mutableStateOf<String?>(null) }
     var showCategoriesDropdown by remember { mutableStateOf(false) }
-
-    // Debounce the search input by 300ms to avoid constant filtering during active typing
-    LaunchedEffect(searchQuery) {
-        delay(300)
-        debouncedSearchQuery = searchQuery
-    }
 
     LaunchedEffect(initialSeries) {
         if (initialSeries != null) {
@@ -3204,10 +3164,10 @@ fun SeriesScreen(
     }
 
     // Global Search across entire series catalog
-    val searchResults = remember(debouncedSearchQuery, seriesList) {
-        if (debouncedSearchQuery.isBlank()) emptyList()
+    val searchResults = remember(searchQuery, seriesList) {
+        if (searchQuery.isBlank()) emptyList()
         else {
-            val tokens = SearchUtils.extractTokens(debouncedSearchQuery)
+            val tokens = SearchUtils.extractTokens(searchQuery)
             seriesList.filter { SearchUtils.matchesAnyField(tokens, it.name, it.category) }
         }
     }
@@ -3227,37 +3187,161 @@ fun SeriesScreen(
     // Layout: Spotlight Banner no topo (largura total 100%, 0px bordas),
     // seguido diretamente pela Busca e botão pílula de Categorias
     Column(modifier = Modifier.fillMaxSize()) {
+        // Spotlight Banner em destaque (largura total, 0px bordas retas) - escondido na busca e grade para maximizar espaço de resultados
+        if (searchQuery.isBlank() && selectedCategoryForGrid == null) {
+            if (seriesHeroItems.isNotEmpty()) {
+                SpotlightBannerCarousel(
+                    items = seriesHeroItems,
+                    onPlay = { _, _, _ -> },
+                    onOpenSeries = { onOpenSeriesItem(it) },
+                    onOpenMovie = {}
+                )
+            }
+        }
+
+        // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable para reter o foco e manter o teclado aberto)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Buscar em todas as séries...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = OrangePrimary,
+                    unfocusedBorderColor = Color(0xFF2D3245),
+                    focusedContainerColor = Color(0xFF141722),
+                    unfocusedContainerColor = Color(0xFF141722)
+                )
+            )
+
+            // Só exibe as categorias/retorno se o usuário não estiver buscando ativamente
+            if (searchQuery.isBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box {
+                        Button(
+                            onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FilterList,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showCategoriesDropdown,
+                            onDismissRequest = { showCategoriesDropdown = false },
+                            modifier = Modifier
+                                .background(Color(0xFF161924))
+                                .widthIn(min = 220.dp, max = 290.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Todas as Categorias (Carrosséis)",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                                    )
+                                },
+                                onClick = {
+                                    selectedCategoryForGrid = null
+                                    showCategoriesDropdown = false
+                                }
+                            )
+                            Divider(color = Color.White.copy(alpha = 0.12f))
+                            allCategoriesList.forEach { cat ->
+                                val count = categoriesMap[cat]?.size ?: 0
+                                val isSelected = selectedCategoryForGrid == cat
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = cat,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                                modifier = Modifier.weight(1f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = Color(0xFF23283B)
+                                            ) {
+                                                Text(
+                                                    text = "$count",
+                                                    fontSize = 10.sp,
+                                                    color = Color.Gray,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedCategoryForGrid = cat
+                                        showCategoriesDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (selectedCategoryForGrid != null) {
+                        TextButton(onClick = { selectedCategoryForGrid = null }) {
+                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ÁREA DE CONTEÚDO DINÂMICA
         if (searchQuery.isNotBlank()) {
             // VIEW 1: SEARCH RESULTS
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp)
             ) {
-                // Barra de busca escura arredondada
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Buscar em todas as séries...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-                    trailingIcon = {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = OrangePrimary,
-                        unfocusedBorderColor = Color(0xFF2D3245),
-                        focusedContainerColor = Color(0xFF141722),
-                        unfocusedContainerColor = Color(0xFF141722)
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
                 if (searchResults.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(text = "Nenhuma série encontrada para \"$searchQuery\".", color = Color.Gray)
@@ -3292,26 +3376,9 @@ fun SeriesScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp)
             ) {
                 val catSeries = categoriesMap[selectedCategoryForGrid] ?: emptyList()
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "$selectedCategoryForGrid (${catSeries.size} séries)",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    TextButton(onClick = { selectedCategoryForGrid = null }) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
                 Spacer(modifier = Modifier.height(6.dp))
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
@@ -3329,163 +3396,31 @@ fun SeriesScreen(
                 }
             }
         } else {
-            // VIEW 3: MAIN VIEW
-            // 1. Banner em Destaque (Spotlight Banner): Posicionado diretamente abaixo da barra superior (100% largura, 0px bordas)
-            // 2. Busca e Categorias: Colocados diretamente ABAIXO do banner em destaque
-            // 3. Carrosséis de cada categoria
+            // VIEW 3: MAIN VIEW (Carrosséis por categoria)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Banner em Destaque (Spotlight Banner)
-                if (seriesHeroItems.isNotEmpty()) {
-                    item(key = "spotlight_banner") {
-                        SpotlightBannerCarousel(
-                            items = seriesHeroItems,
-                            onPlay = { _, _, _ -> },
-                            onOpenSeries = { onOpenSeriesItem(it) },
-                            onOpenMovie = {}
-                        )
-                    }
-                }
-
-                // Busca e Categorias (Colocados diretamente ABAIXO do banner em destaque)
-                item(key = "search_and_categories_bar") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
-                    ) {
-                        // Primeiro elemento: Uma barra de busca escura arredondada
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Buscar em todas as séries...") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = OrangePrimary,
-                                unfocusedBorderColor = Color(0xFF2D3245),
-                                focusedContainerColor = Color(0xFF141722),
-                                unfocusedContainerColor = Color(0xFF141722)
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Segundo elemento: Um botão no formato pílula "Categorias"
-                        Box {
-                            Button(
-                                onClick = { showCategoriesDropdown = !showCategoriesDropdown },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FilterList,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            DropdownMenu(
-                                expanded = showCategoriesDropdown,
-                                onDismissRequest = { showCategoriesDropdown = false },
-                                modifier = Modifier
-                                    .background(Color(0xFF161924))
-                                    .widthIn(min = 220.dp, max = 290.dp)
-                            ) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = "Todas as Categorias (Carrosséis)",
-                                            fontSize = 12.5.sp,
-                                            fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
-                                        )
-                                    },
-                                    onClick = {
-                                        selectedCategoryForGrid = null
-                                        showCategoriesDropdown = false
-                                    }
-                                )
-                                Divider(color = Color.White.copy(alpha = 0.12f))
-                                allCategoriesList.forEach { cat ->
-                                    val count = categoriesMap[cat]?.size ?: 0
-                                    val isSelected = selectedCategoryForGrid == cat
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = cat,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
-                                                    modifier = Modifier.weight(1f),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Surface(
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = Color(0xFF23283B)
-                                                ) {
-                                                    Text(
-                                                        text = "$count",
-                                                        fontSize = 10.sp,
-                                                        color = Color.Gray,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
-                                        },
-                                        onClick = {
-                                            selectedCategoryForGrid = cat
-                                            showCategoriesDropdown = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // Carrosséis de cada categoria
                 categoriesMap.forEach { (catName, catSeries) ->
                     item(key = "cat_$catName") {
-                        SectionHeaderWithAction(
-                            title = catName,
-                            actionText = "Ver tudo",
-                            onAction = { selectedCategoryForGrid = catName }
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        SeriesHorizontalCarousel(
-                            seriesList = catSeries,
-                            onOpenSeries = { onOpenSeriesItem(it) }
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp)
+                        ) {
+                            SectionHeaderWithAction(
+                                title = catName,
+                                actionText = "Ver tudo",
+                                onAction = { selectedCategoryForGrid = catName }
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            SeriesHorizontalCarousel(
+                                seriesList = catSeries,
+                                onOpenSeries = { onOpenSeriesItem(it) }
+                            )
+                        }
                     }
                 }
             }

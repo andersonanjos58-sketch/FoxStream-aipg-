@@ -1,11 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { 
   Play, Tv, Film, Clapperboard, Heart, Clock, ChevronRight, 
-  ChevronLeft, Plus, Sparkles, Star, Calendar, ArrowRight, Trash2,
-  Flame, TrendingUp, Rocket
+  ChevronLeft, Plus, Sparkles, Trash2,
+  TrendingUp, Rocket
 } from 'lucide-react';
 import { LiveChannel, MovieItem, SeriesItem, HistoryItem, FavoriteItem, Playlist } from '../types';
-import { TmdbService, evaluateSmartMatch, cleanTitleForTmdb } from '../services/tmdbService';
+import { TmdbService } from '../services/tmdbService';
 
 interface HomeScreenProps {
   activePlaylist: Playlist | null;
@@ -22,6 +22,176 @@ interface HomeScreenProps {
   onNavigateTab: (tab: 'live' | 'movies' | 'series' | 'favorites' | 'playlists') => void;
   onOpenAddPlaylist: () => void;
 }
+
+// Module-level in-memory cache to prevent re-fetching TMDb data on tab switches
+const tmdbMemoryCache = new Map<string, {
+  trending: (MovieItem | SeriesItem)[];
+  popularMovies: MovieItem[];
+  popularSeries: SeriesItem[];
+  newReleases: (MovieItem | SeriesItem)[];
+  timestamp: number;
+}>();
+
+/**
+ * LazySection: Renders children on-demand when the user scrolls near the section.
+ * Mounts 350px before entering viewport so the user experiences zero lag or visual flicker.
+ */
+const LazySection: React.FC<{
+  children: React.ReactNode;
+  minHeight?: string | number;
+  rootMargin?: string;
+}> = ({ children, minHeight = '240px', rootMargin = '350px' }) => {
+  const [isVisible, setIsVisible] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isVisible) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setIsVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isVisible, rootMargin]);
+
+  return (
+    <div ref={containerRef} style={{ minHeight: isVisible ? 'auto' : minHeight }}>
+      {isVisible ? children : null}
+    </div>
+  );
+};
+
+/**
+ * FeaturedHeaderBanner: ISOLATED component for the spotlight auto-scroll banner.
+ * Keeps the 3-second timer localized so advancing slides NEVER re-renders the rest of HomeScreen!
+ */
+interface FeaturedHeaderBannerProps {
+  featuredList: (MovieItem | SeriesItem)[];
+  onSelectMovie: (movie: MovieItem) => void;
+  onSelectSeries: (series: SeriesItem) => void;
+}
+
+const FeaturedHeaderBanner: React.FC<FeaturedHeaderBannerProps> = React.memo(({
+  featuredList,
+  onSelectMovie,
+  onSelectSeries
+}) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    if (featuredList.length <= 1 || isPaused) return;
+
+    const timer = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % featuredList.length);
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [featuredList.length, isPaused]);
+
+  const currentItem = featuredList[currentIndex] || featuredList[0];
+  if (!currentItem) return null;
+
+  return (
+    <section 
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      onTouchStart={() => setIsPaused(true)}
+      onTouchEnd={() => setIsPaused(false)}
+      className="relative h-64 sm:h-80 md:h-96 w-full overflow-hidden transition-all duration-500 bg-black select-none"
+    >
+      {/* Background image backdrop */}
+      {currentItem.posterUrl || ('backdropUrl' in currentItem && currentItem.backdropUrl) ? (
+        <img
+          key={currentItem.id}
+          src={('backdropUrl' in currentItem && currentItem.backdropUrl) ? currentItem.backdropUrl : currentItem.posterUrl}
+          alt={currentItem.name}
+          referrerPolicy="no-referrer"
+          loading="eager"
+          decoding="async"
+          className="w-full h-full object-cover blur-sm opacity-35 scale-105 transition-all duration-700 animate-in fade-in"
+        />
+      ) : (
+        <div className="w-full h-full bg-gradient-to-r from-orange-950/30 to-neutral-900" />
+      )}
+
+      {/* Gradients */}
+      <div className="absolute inset-0 bg-gradient-to-t from-[#090a0f] via-[#090a0f]/60 to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#090a0f] via-transparent to-transparent pointer-events-none" />
+
+      {/* Content Overlay */}
+      <div className="absolute bottom-6 left-4 sm:left-8 right-4 max-w-2xl space-y-2.5 z-10">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-orange-400 font-bold uppercase tracking-wider">
+            {currentItem.category || 'Em Destaque'}
+          </span>
+          {currentItem.year && (
+            <span className="text-xs text-neutral-400 font-medium">
+              • {currentItem.year}
+            </span>
+          )}
+        </div>
+
+        <h1 className="text-2xl sm:text-4xl font-black text-white font-['Outfit'] tracking-tight line-clamp-2">
+          {currentItem.name}
+        </h1>
+
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              if ('seasons' in currentItem) {
+                onSelectSeries(currentItem as SeriesItem);
+              } else {
+                onSelectMovie(currentItem as MovieItem);
+              }
+            }}
+            className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold py-2.5 px-6 rounded-xl text-xs shadow-lg shadow-orange-950/40 active:scale-95 transition-all cursor-pointer"
+          >
+            <Play className="w-4 h-4 fill-white stroke-none" />
+            <span>Assistir</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Pager Dots */}
+      {featuredList.length > 1 && (
+        <div className="absolute bottom-4 right-6 flex items-center gap-1.5 z-10">
+          {featuredList.map((_, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => {
+                setCurrentIndex(idx);
+                setIsPaused(true);
+              }}
+              className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                idx === currentIndex 
+                  ? 'w-6 bg-orange-500' 
+                  : 'w-1.5 bg-white/30 hover:bg-white/60'
+              }`}
+              aria-label={`Destaque ${idx + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+});
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   activePlaylist,
@@ -40,8 +210,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 }) => {
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
-  const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
 
   // Carousel scroll helpers
   const scrollRef = (element: HTMLDivElement | null, distance: number) => {
@@ -55,21 +223,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const liveRef = useRef<HTMLDivElement>(null);
   const moviesRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<HTMLDivElement>(null);
-  const trendingRef = useRef<HTMLDivElement>(null);
   const popMoviesRef = useRef<HTMLDivElement>(null);
   const popSeriesRef = useRef<HTMLDivElement>(null);
   const newReleasesRef = useRef<HTMLDivElement>(null);
 
-  // TMDb Category Carousels State with instant localStorage persistence
+  // Cache key per playlist
   const cacheKey = activePlaylist ? `foxstream_home_cache_${activePlaylist.id}` : null;
-  const initialCache = React.useMemo(() => {
+
+  // Initial data from memory cache or localStorage
+  const initialCache = useMemo(() => {
     if (!cacheKey) return null;
+    if (tmdbMemoryCache.has(cacheKey)) {
+      return tmdbMemoryCache.get(cacheKey)!;
+    }
     try {
       const saved = localStorage.getItem(cacheKey);
-      return saved ? JSON.parse(saved) : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        tmdbMemoryCache.set(cacheKey, parsed);
+        return parsed;
+      }
     } catch {
-      return null;
+      // ignore
     }
+    return null;
   }, [cacheKey]);
 
   const [trendingItems, setTrendingItems] = useState<(MovieItem | SeriesItem)[]>(() => {
@@ -110,8 +287,34 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return combined.slice(0, 20);
   });
 
-  // Dynamic top categories extracted directly from playlist items for up to 12 carousels
-  const topPlaylistCategories = React.useMemo(() => {
+  // O(1) Pre-Indexed Category Maps to avoid repeating expensive 10k item filters in JSX
+  const categoryIndex = useMemo(() => {
+    const movieCatMap = new Map<string, MovieItem[]>();
+    movies.forEach(m => {
+      const k = m.category?.toLowerCase() || '';
+      if (!movieCatMap.has(k)) movieCatMap.set(k, []);
+      movieCatMap.get(k)!.push(m);
+    });
+
+    const seriesCatMap = new Map<string, SeriesItem[]>();
+    series.forEach(s => {
+      const k = s.category?.toLowerCase() || '';
+      if (!seriesCatMap.has(k)) seriesCatMap.set(k, []);
+      seriesCatMap.get(k)!.push(s);
+    });
+
+    const channelCatMap = new Map<string, LiveChannel[]>();
+    channels.forEach(ch => {
+      const k = ch.category?.toLowerCase() || '';
+      if (!channelCatMap.has(k)) channelCatMap.set(k, []);
+      channelCatMap.get(k)!.push(ch);
+    });
+
+    return { movieCatMap, seriesCatMap, channelCatMap };
+  }, [movies, series, channels]);
+
+  // Dynamic top categories extracted directly from playlist items for up to 10 carousels
+  const topPlaylistCategories = useMemo(() => {
     const frequency: Record<string, number> = {};
     movies.forEach(m => {
       const c = m.category?.trim();
@@ -131,41 +334,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         frequency[c] = (frequency[c] || 0) + 1;
       }
     });
-    return Object.keys(frequency).sort((a, b) => frequency[b] - frequency[a]).slice(0, 12);
+    return Object.keys(frequency).sort((a, b) => frequency[b] - frequency[a]).slice(0, 10);
   }, [movies, series, channels]);
 
   // Featured List (carrossel de destaques)
-  const featuredList = React.useMemo(() => {
+  const featuredList = useMemo(() => {
     const list = trendingItems.length > 0 ? trendingItems : [...movies.slice(0, 5), ...series.slice(0, 5)];
     return list.slice(0, 8);
   }, [trendingItems, movies, series]);
 
-  // Hydrate from persistent cache if available
-  React.useEffect(() => {
-    if (initialCache) {
-      if (initialCache.trending?.length) setTrendingItems(initialCache.trending);
-      if (initialCache.popularMovies?.length) setPopularMoviesList(initialCache.popularMovies);
-      if (initialCache.popularSeries?.length) setPopularSeriesList(initialCache.popularSeries);
-      if (initialCache.newReleases?.length) setNewReleasesList(initialCache.newReleases);
-    }
-  }, [initialCache]);
-
-  React.useEffect(() => {
-    if (featuredList.length <= 1 || isPaused) return;
-
-    const timer = setInterval(() => {
-      setCurrentFeaturedIndex(prev => (prev + 1) % featuredList.length);
-    }, 3000);
-
-    return () => clearInterval(timer);
-  }, [featuredList.length, isPaused]);
-
-  React.useEffect(() => {
+  // Asynchronous TMDb Category Loader with Memory & LocalStorage Cache
+  useEffect(() => {
     let isCancelled = false;
+
+    // If cache was refreshed in the last 45 minutes, skip re-fetching
+    if (initialCache && Date.now() - (initialCache.timestamp || 0) < 45 * 60 * 1000) {
+      return;
+    }
 
     const loadTmdbCategories = async () => {
       try {
-        // Fetch all TMDb endpoints in PARALLEL safely (~0.5s)
         const [trendM, trendTv, popM, popTv, nowPlaying, airingTv] = await Promise.all([
           TmdbService.fetchTrendingMovies().catch(() => []),
           TmdbService.fetchTrendingTv().catch(() => []),
@@ -176,7 +364,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         ]);
         if (isCancelled) return;
 
-        // 1. Destaques (Trending Movies & Series used for Highlights banner)
+        // 1. Destaques
         const matchedTrending: (MovieItem | SeriesItem)[] = [];
         trendM.forEach(tmdb => {
           matchedTrending.push({
@@ -205,51 +393,42 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             seasons: []
           } as any);
         });
-        const finalTrending = matchedTrending.length > 0 ? matchedTrending.slice(0, 15) : [];
+        const finalTrending = matchedTrending.slice(0, 15);
         setTrendingItems(finalTrending);
 
-        // 2. Filmes Populares (Popular Movies)
-        const matchedPopM: MovieItem[] = [];
-        popM.forEach(tmdb => {
-          matchedPopM.push({
-            id: `tmdb_movie_${tmdb.tmdbId}`,
-            playlistId: '',
-            name: tmdb.title || '',
-            streamUrl: '',
-            posterUrl: tmdb.poster,
-            backdropUrl: tmdb.backdrop,
-            category: 'TMDb',
-            year: tmdb.year,
-            rating: tmdb.rating,
-            description: tmdb.plot
-          });
-        });
-        const finalPopM = matchedPopM.length > 0 ? matchedPopM.slice(0, 15) : [];
-        setPopularMoviesList(finalPopM);
+        // 2. Filmes Populares
+        const matchedPopM: MovieItem[] = popM.map(tmdb => ({
+          id: `tmdb_movie_${tmdb.tmdbId}`,
+          playlistId: '',
+          name: tmdb.title || '',
+          streamUrl: '',
+          posterUrl: tmdb.poster,
+          backdropUrl: tmdb.backdrop,
+          category: 'TMDb',
+          year: tmdb.year,
+          rating: tmdb.rating,
+          description: tmdb.plot
+        })).slice(0, 15);
+        setPopularMoviesList(matchedPopM);
 
-        // 3. Séries Populares (Popular TV)
-        const matchedPopTv: SeriesItem[] = [];
-        popTv.forEach(tmdb => {
-          matchedPopTv.push({
-            id: `tmdb_series_${tmdb.tmdbId}`,
-            playlistId: '',
-            name: tmdb.title || '',
-            posterUrl: tmdb.poster,
-            backdropUrl: tmdb.backdrop,
-            category: 'TMDb',
-            year: tmdb.year,
-            rating: tmdb.rating,
-            description: tmdb.plot,
-            seasons: []
-          });
-        });
-        const finalPopTv = matchedPopTv.length > 0 ? matchedPopTv.slice(0, 15) : [];
-        setPopularSeriesList(finalPopTv);
+        // 3. Séries Populares
+        const matchedPopTv: SeriesItem[] = popTv.map(tmdb => ({
+          id: `tmdb_series_${tmdb.tmdbId}`,
+          playlistId: '',
+          name: tmdb.title || '',
+          posterUrl: tmdb.poster,
+          backdropUrl: tmdb.backdrop,
+          category: 'TMDb',
+          year: tmdb.year,
+          rating: tmdb.rating,
+          description: tmdb.plot,
+          seasons: []
+        })).slice(0, 15);
+        setPopularSeriesList(matchedPopTv);
 
-        // 4. Lançamentos (Now Playing Movies & Airing Series)
-        const matchedReleases: (MovieItem | SeriesItem)[] = [];
-        nowPlaying.forEach(tmdb => {
-          matchedReleases.push({
+        // 4. Lançamentos
+        const matchedReleases: (MovieItem | SeriesItem)[] = [
+          ...nowPlaying.map(tmdb => ({
             id: `tmdb_release_m_${tmdb.tmdbId}`,
             playlistId: '',
             name: tmdb.title || '',
@@ -260,10 +439,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             year: tmdb.year,
             rating: tmdb.rating,
             description: tmdb.plot
-          } as any);
-        });
-        airingTv.forEach(tmdb => {
-          matchedReleases.push({
+          } as any)),
+          ...airingTv.map(tmdb => ({
             id: `tmdb_release_s_${tmdb.tmdbId}`,
             playlistId: '',
             name: tmdb.title || '',
@@ -274,25 +451,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             rating: tmdb.rating,
             description: tmdb.plot,
             seasons: []
-          } as any);
-        });
+          } as any))
+        ].slice(0, 20);
+        setNewReleasesList(matchedReleases);
 
-        const finalReleases = matchedReleases.length > 0 ? matchedReleases.slice(0, 20) : [];
-        setNewReleasesList(finalReleases);
-
-        // Save into persistent local storage cache for instant opening next time
+        // Save into memory cache and write to localStorage in background without blocking UI
         if (cacheKey) {
-          try {
-            localStorage.setItem(cacheKey, JSON.stringify({
-              trending: finalTrending,
-              popularMovies: finalPopM,
-              popularSeries: finalPopTv,
-              newReleases: finalReleases,
-              timestamp: Date.now()
-            }));
-          } catch (e) {
-            console.warn('LocalStorage save failed:', e);
-          }
+          const payload = {
+            trending: finalTrending,
+            popularMovies: matchedPopM,
+            popularSeries: matchedPopTv,
+            newReleases: matchedReleases,
+            timestamp: Date.now()
+          };
+          tmdbMemoryCache.set(cacheKey, payload);
+          setTimeout(() => {
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify(payload));
+            } catch {
+              // ignore
+            }
+          }, 0);
         }
       } catch (err) {
         console.warn('Error loading TMDb categories:', err);
@@ -304,7 +483,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [movies, series, cacheKey]);
+  }, [cacheKey, initialCache]);
 
   // If no playlist is loaded, show welcoming setup hero
   if (!activePlaylist) {
@@ -360,7 +539,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <button
             type="button"
             onClick={onOpenAddPlaylist}
-            className="inline-flex items-center gap-2.5 bg-gradient-to-r from-orange-500 via-amber-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white font-bold py-3.5 px-8 rounded-2xl text-sm shadow-xl shadow-orange-950/50 active:scale-95 transition-all"
+            className="inline-flex items-center gap-2.5 bg-gradient-to-r from-orange-500 via-amber-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white font-bold py-3.5 px-8 rounded-2xl text-sm shadow-xl shadow-orange-950/50 active:scale-95 transition-all cursor-pointer"
           >
             <Plus className="w-5 h-5" />
             <span>Adicionar Minha Lista</span>
@@ -370,101 +549,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     );
   }
 
-  const currentFeatured = featuredList[currentFeaturedIndex] || movies[0];
-
   return (
-    <div className="space-y-6 pb-24 overflow-x-hidden animate-in fade-in duration-300">
-      {/* Featured Header Banner Carousel */}
-      {currentFeatured && (
-        <section 
-          onMouseEnter={() => setIsPaused(true)}
-          onMouseLeave={() => setIsPaused(false)}
-          onTouchStart={() => setIsPaused(true)}
-          onTouchEnd={() => setIsPaused(false)}
-          className="relative h-64 sm:h-80 md:h-96 w-full overflow-hidden transition-all duration-500"
-        >
-          {/* Background image backdrop */}
-          {currentFeatured.posterUrl ? (
-            <img
-              key={currentFeatured.id}
-              src={currentFeatured.posterUrl}
-              alt={currentFeatured.name}
-              referrerPolicy="no-referrer"
-              className="w-full h-full object-cover blur-sm opacity-35 scale-105 transition-all duration-700 animate-in fade-in"
-            />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-r from-orange-950/30 to-neutral-900" />
-          )}
-
-          {/* Gradients */}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#090a0f] via-[#090a0f]/60 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#090a0f] via-transparent to-transparent" />
-
-          {/* Content Overlay (Clean layout without synopsis and without internal tag) */}
-          <div className="absolute bottom-6 left-4 sm:left-8 right-4 max-w-2xl space-y-2.5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-orange-400 font-bold uppercase tracking-wider">
-                {currentFeatured.category || 'Em Destaque'}
-              </span>
-              {currentFeatured.year && (
-                <span className="text-xs text-neutral-400 font-medium">
-                  • {currentFeatured.year}
-                </span>
-              )}
-            </div>
-
-            <h1 className="text-2xl sm:text-4xl font-black text-white font-['Outfit'] tracking-tight line-clamp-2">
-              {currentFeatured.name}
-            </h1>
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if ('seasons' in currentFeatured) {
-                    onSelectSeries(currentFeatured as SeriesItem);
-                  } else {
-                    onSelectMovie(currentFeatured as MovieItem);
-                  }
-                }}
-                className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold py-2.5 px-6 rounded-xl text-xs shadow-lg shadow-orange-950/40 active:scale-95 transition-all cursor-pointer"
-              >
-                <Play className="w-4 h-4 fill-white stroke-none" />
-                <span>Assistir</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Pager Dots */}
-          {featuredList.length > 1 && (
-            <div className="absolute bottom-4 right-6 flex items-center gap-1.5 z-10">
-              {featuredList.map((_, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => {
-                    setCurrentFeaturedIndex(idx);
-                    setIsPaused(true);
-                  }}
-                  className={`h-1.5 rounded-full transition-all duration-300 ${
-                    idx === currentFeaturedIndex 
-                      ? 'w-6 bg-orange-500' 
-                      : 'w-1.5 bg-white/30 hover:bg-white/60'
-                  }`}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+    <div className="space-y-6 pb-24 overflow-x-hidden animate-in fade-in duration-200">
+      {/* 1. Featured Header Banner Carousel (Isolated to avoid re-rendering HomeScreen on timer ticks) */}
+      <FeaturedHeaderBanner
+        featuredList={featuredList}
+        onSelectMovie={onSelectMovie}
+        onSelectSeries={onSelectSeries}
+      />
 
       {/* If a specific category is selected, render its items */}
       {selectedCategory !== 'Todos' && (
         <div className="space-y-6">
           {(() => {
-            const catMovies = movies.filter(m => m.category?.toLowerCase() === selectedCategory.toLowerCase());
-            const catSeries = series.filter(s => s.category?.toLowerCase() === selectedCategory.toLowerCase());
-            const catChannels = channels.filter(ch => ch.category?.toLowerCase() === selectedCategory.toLowerCase());
+            const k = selectedCategory.toLowerCase();
+            const catMovies = categoryIndex.movieCatMap.get(k) || [];
+            const catSeries = categoryIndex.seriesCatMap.get(k) || [];
+            const catChannels = categoryIndex.channelCatMap.get(k) || [];
 
             return (
               <>
@@ -481,14 +582,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       <button
                         type="button"
                         onClick={() => onNavigateTab('movies')}
-                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
                       >
                         Ver na aba Filmes <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
                     <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
-                      {catMovies.map(movie => (
+                      {catMovies.slice(0, 24).map(movie => (
                         <div
                           key={`cat_m_${movie.id}`}
                           onClick={() => onSelectMovie(movie)}
@@ -496,7 +597,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         >
                           <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
                             {movie.posterUrl ? (
-                              <img src={movie.posterUrl} alt={movie.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                              <img
+                                src={movie.posterUrl}
+                                alt={movie.name}
+                                referrerPolicy="no-referrer"
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Film className="w-8 h-8" /></div>
                             )}
@@ -524,14 +632,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       <button
                         type="button"
                         onClick={() => onNavigateTab('series')}
-                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
                       >
                         Ver na aba Séries <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
                     <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
-                      {catSeries.map(s => (
+                      {catSeries.slice(0, 24).map(s => (
                         <div
                           key={`cat_s_${s.id}`}
                           onClick={() => onSelectSeries(s)}
@@ -539,7 +647,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         >
                           <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
                             {s.posterUrl ? (
-                              <img src={s.posterUrl} alt={s.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                              <img
+                                src={s.posterUrl}
+                                alt={s.name}
+                                referrerPolicy="no-referrer"
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Clapperboard className="w-8 h-8" /></div>
                             )}
@@ -567,14 +682,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       <button
                         type="button"
                         onClick={() => onNavigateTab('live')}
-                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                        className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
                       >
                         Ver na aba TV ao Vivo <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
                     <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
-                      {catChannels.map(ch => (
+                      {catChannels.slice(0, 24).map(ch => (
                         <div
                           key={`cat_ch_${ch.id}`}
                           onClick={() => onPlayChannel(ch)}
@@ -582,7 +697,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         >
                           <div className="w-full h-20 rounded-xl bg-neutral-900/90 flex items-center justify-center p-2 mb-2 relative overflow-hidden border border-neutral-800">
                             {ch.logoUrl ? (
-                              <img src={ch.logoUrl} alt={ch.name} referrerPolicy="no-referrer" className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200" />
+                              <img
+                                src={ch.logoUrl}
+                                alt={ch.name}
+                                referrerPolicy="no-referrer"
+                                loading="lazy"
+                                decoding="async"
+                                className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200"
+                              />
                             ) : (
                               <Tv className="w-8 h-8 text-neutral-600" />
                             )}
@@ -616,14 +738,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => scrollRef(historyRef.current, -300)}
-                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
+                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white cursor-pointer"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
                     onClick={() => scrollRef(historyRef.current, 300)}
-                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
+                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white cursor-pointer"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -634,7 +756,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 ref={historyRef}
                 className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
               >
-                {history.map((item) => {
+                {history.slice(0, 15).map((item) => {
                   const isSelected = selectedHistoryId === item.id;
                   const seriesMatch = item.type === 'series'
                     ? series.find(s => 
@@ -664,7 +786,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                           {itemPoster ? (
                             <img 
                               src={itemPoster} 
-                              alt={item.title} 
+                              alt={item.title}
+                              loading="lazy"
+                              decoding="async"
                               className="w-full h-full object-cover rounded-xl"
                               onError={(e) => {
                                 (e.target as HTMLElement).style.display = 'none';
@@ -698,7 +822,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             setSelectedHistoryId(null);
                           }}
                         >
-                          {/* Native red trash icon in top-right dark circular button */}
                           <button
                             type="button"
                             title="Remover de Continue Assistindo"
@@ -707,12 +830,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                               setSelectedHistoryId(null);
                               onRemoveHistoryItem?.(item.id);
                             }}
-                            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-neutral-800 border border-white/15 flex items-center justify-center text-red-500 hover:text-red-400 transition-colors shadow-md active:scale-90"
+                            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-neutral-800 border border-white/15 flex items-center justify-center text-red-500 hover:text-red-400 transition-colors shadow-md active:scale-90 cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4 stroke-[2.2]" />
                           </button>
 
-                          {/* Orange primary circular play button centered */}
                           <button
                             type="button"
                             title="Continuar reprodução"
@@ -721,7 +843,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                               setSelectedHistoryId(null);
                               onPlayHistoryItem(item);
                             }}
-                            className="w-11 h-11 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-lg shadow-orange-950/70 transition-transform hover:scale-105 active:scale-95"
+                            className="w-11 h-11 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-lg shadow-orange-950/70 transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                           >
                             <Play className="w-5 h-5 fill-white stroke-none ml-0.5" />
                           </button>
@@ -747,7 +869,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <button
               type="button"
               onClick={() => onNavigateTab('favorites')}
-              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
             >
               Ver todos <ChevronRight className="w-3.5 h-3.5" />
             </button>
@@ -757,7 +879,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             ref={favoritesRef}
             className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
           >
-            {favorites.map((fav) => (
+            {favorites.slice(0, 20).map((fav) => (
               <div
                 key={fav.id}
                 onClick={() => {
@@ -785,6 +907,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       src={fav.posterUrl}
                       alt={fav.title}
                       referrerPolicy="no-referrer"
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   ) : (
@@ -823,7 +947,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <button
             type="button"
             onClick={() => onNavigateTab('live')}
-            className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+            className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
           >
             Ver todos <ChevronRight className="w-3.5 h-3.5" />
           </button>
@@ -844,13 +968,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 onClick={() => onPlayChannel(channel)}
                 className="group relative flex-shrink-0 w-36 sm:w-44 p-3 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-orange-500/60 cursor-pointer transition-all active:scale-95 shadow-md flex flex-col justify-between"
               >
-                {/* Logo or placeholder */}
                 <div className="w-full h-20 rounded-xl bg-neutral-900/90 flex items-center justify-center p-2 mb-2 relative overflow-hidden border border-neutral-800">
                   {channel.logoUrl ? (
                     <img
                       src={channel.logoUrl}
                       alt={channel.name}
                       referrerPolicy="no-referrer"
+                      loading="lazy"
+                      decoding="async"
                       className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200"
                       onError={(e) => {
                         (e.target as HTMLElement).style.display = 'none';
@@ -859,7 +984,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   ) : (
                     <Tv className="w-8 h-8 text-neutral-600" />
                   )}
-                  {/* Live Badge */}
                   <span className="absolute top-1.5 right-1.5 flex items-center gap-1 bg-red-600/90 text-white text-[9px] font-black uppercase px-1.5 py-0.2 rounded">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
                     Ao Vivo
@@ -895,7 +1019,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <button
             type="button"
             onClick={() => onNavigateTab('movies')}
-            className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+            className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
           >
             Ver catálogo de filmes <ChevronRight className="w-3.5 h-3.5" />
           </button>
@@ -922,6 +1046,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       src={movie.posterUrl}
                       alt={movie.name}
                       referrerPolicy="no-referrer"
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   ) : (
@@ -961,7 +1087,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <button
             type="button"
             onClick={() => onNavigateTab('series')}
-            className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
+            className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
           >
             Ver todas as séries <ChevronRight className="w-3.5 h-3.5" />
           </button>
@@ -988,6 +1114,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       src={s.posterUrl}
                       alt={s.name}
                       referrerPolicy="no-referrer"
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   ) : (
@@ -1010,345 +1138,385 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         )}
       </section>
 
-      {/* SECTION 7: FILMES POPULARES (TMDb Popular Movies) */}
+      {/* SECTION 7: FILMES POPULARES (TMDb Popular Movies) - Lazy loaded on user scroll */}
       {popularMoviesList.length > 0 && (
-        <section className="px-4 max-w-7xl mx-auto space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                Filmes populares
-              </h2>
-              <span className="text-xs text-neutral-500 font-medium">
-                (TMDb)
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigateTab('movies')}
-              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-            >
-              Ver mais <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div
-            ref={popMoviesRef}
-            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
-          >
-            {popularMoviesList.map((movie) => (
-              <div
-                key={`pop_movie_${movie.id}`}
-                onClick={() => onSelectMovie(movie)}
-                className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-amber-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
-              >
-                <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
-                  {movie.posterUrl ? (
-                    <img
-                      src={movie.posterUrl}
-                      alt={movie.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
-                      <Film className="w-8 h-8" />
-                    </div>
-                  )}
-
-                  {movie.rating ? (
-                    <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                      ★ {movie.rating}
-                    </span>
-                  ) : movie.year ? (
-                    <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
-                      {movie.year}
-                    </span>
-                  ) : null}
-                </div>
-
-                <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
-                  {movie.name}
-                </h4>
+        <LazySection minHeight="280px" rootMargin="350px">
+          <section className="px-4 max-w-7xl mx-auto space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                  Filmes populares
+                </h2>
+                <span className="text-xs text-neutral-500 font-medium">
+                  (TMDb)
+                </span>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* SECTION 8: SÉRIES POPULARES (TMDb Popular TV) */}
-      {popularSeriesList.length > 0 && (
-        <section className="px-4 max-w-7xl mx-auto space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-rose-400" />
-              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                Séries populares
-              </h2>
-              <span className="text-xs text-neutral-500 font-medium">
-                (TMDb)
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigateTab('series')}
-              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-            >
-              Ver mais <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div
-            ref={popSeriesRef}
-            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
-          >
-            {popularSeriesList.map((s) => (
-              <div
-                key={`pop_series_${s.id}`}
-                onClick={() => onSelectSeries(s)}
-                className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-rose-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+              <button
+                type="button"
+                onClick={() => onNavigateTab('movies')}
+                className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
               >
-                <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
-                  {s.posterUrl ? (
-                    <img
-                      src={s.posterUrl}
-                      alt={s.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
-                      <Clapperboard className="w-8 h-8" />
-                    </div>
-                  )}
-
-                  <span className="absolute bottom-2 right-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
-                    {s.seasons?.length || 1} Temp
-                  </span>
-                </div>
-
-                <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
-                  {s.name}
-                </h4>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* SECTION 9: LANÇAMENTOS (Now Playing & Airing Releases) */}
-      {newReleasesList.length > 0 && (
-        <section className="px-4 max-w-7xl mx-auto space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Rocket className="w-4 h-4 text-emerald-400" />
-              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                Lançamentos
-              </h2>
-              <span className="text-xs text-neutral-500 font-medium">
-                (Em Cartaz)
-              </span>
+                Ver mais <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigateTab('movies')}
-              className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-            >
-              Ver mais <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
 
-          <div
-            ref={newReleasesRef}
-            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
-          >
-            {newReleasesList.map((item) => {
-              const isMovie = 'streamUrl' in item;
-              return (
+            <div
+              ref={popMoviesRef}
+              className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+            >
+              {popularMoviesList.map((movie) => (
                 <div
-                  key={`release_${item.id}`}
-                  onClick={() => isMovie ? onSelectMovie(item as MovieItem) : onSelectSeries(item as SeriesItem)}
-                  className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-emerald-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                  key={`pop_movie_${movie.id}`}
+                  onClick={() => onSelectMovie(movie)}
+                  className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-amber-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
                 >
                   <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
-                    {item.posterUrl ? (
+                    {movie.posterUrl ? (
                       <img
-                        src={item.posterUrl}
-                        alt={item.name}
+                        src={movie.posterUrl}
+                        alt={movie.name}
                         referrerPolicy="no-referrer"
+                        loading="lazy"
+                        decoding="async"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
-                        {isMovie ? <Film className="w-8 h-8" /> : <Clapperboard className="w-8 h-8" />}
+                        <Film className="w-8 h-8" />
                       </div>
                     )}
 
-                    {item.year && (
-                      <span className="absolute top-2 left-2 bg-emerald-600/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
-                        {item.year}
-                      </span>
-                    )}
-
-                    {!isMovie && (
-                      <span className="absolute bottom-2 left-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
-                        Série
-                      </span>
-                    )}
-
-                    {item.rating && (
+                    {movie.rating ? (
                       <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                        ★ {item.rating}
+                        ★ {movie.rating}
                       </span>
-                    )}
+                    ) : movie.year ? (
+                      <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
+                        {movie.year}
+                      </span>
+                    ) : null}
                   </div>
 
                   <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
-                    {item.name}
+                    {movie.name}
                   </h4>
                 </div>
-              );
-            })}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        </LazySection>
       )}
 
-      {/* SECTION 10: ATÉ 12 CARROSSÉIS DE CATEGORIAS DA LISTA IPTV */}
+      {/* SECTION 8: SÉRIES POPULARES (TMDb Popular TV) - Lazy loaded on user scroll */}
+      {popularSeriesList.length > 0 && (
+        <LazySection minHeight="280px" rootMargin="350px">
+          <section className="px-4 max-w-7xl mx-auto space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-rose-400" />
+                <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                  Séries populares
+                </h2>
+                <span className="text-xs text-neutral-500 font-medium">
+                  (TMDb)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('series')}
+                className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
+              >
+                Ver mais <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div
+              ref={popSeriesRef}
+              className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+            >
+              {popularSeriesList.map((s) => (
+                <div
+                  key={`pop_series_${s.id}`}
+                  onClick={() => onSelectSeries(s)}
+                  className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-rose-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                >
+                  <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                    {s.posterUrl ? (
+                      <img
+                        src={s.posterUrl}
+                        alt={s.name}
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
+                        <Clapperboard className="w-8 h-8" />
+                      </div>
+                    )}
+
+                    <span className="absolute bottom-2 right-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                      {s.seasons?.length || 1} Temp
+                    </span>
+                  </div>
+
+                  <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
+                    {s.name}
+                  </h4>
+                </div>
+              ))}
+            </div>
+          </section>
+        </LazySection>
+      )}
+
+      {/* SECTION 9: LANÇAMENTOS (Now Playing & Airing Releases) - Lazy loaded on user scroll */}
+      {newReleasesList.length > 0 && (
+        <LazySection minHeight="280px" rootMargin="350px">
+          <section className="px-4 max-w-7xl mx-auto space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Rocket className="w-4 h-4 text-emerald-400" />
+                <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                  Lançamentos
+                </h2>
+                <span className="text-xs text-neutral-500 font-medium">
+                  (Em Cartaz)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('movies')}
+                className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
+              >
+                Ver mais <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div
+              ref={newReleasesRef}
+              className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+            >
+              {newReleasesList.map((item) => {
+                const isMovie = 'streamUrl' in item;
+                return (
+                  <div
+                    key={`release_${item.id}`}
+                    onClick={() => isMovie ? onSelectMovie(item as MovieItem) : onSelectSeries(item as SeriesItem)}
+                    className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-emerald-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                  >
+                    <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                      {item.posterUrl ? (
+                        <img
+                          src={item.posterUrl}
+                          alt={item.name}
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900">
+                          {isMovie ? <Film className="w-8 h-8" /> : <Clapperboard className="w-8 h-8" />}
+                        </div>
+                      )}
+
+                      {item.year && (
+                        <span className="absolute top-2 left-2 bg-emerald-600/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                          {item.year}
+                        </span>
+                      )}
+
+                      {!isMovie && (
+                        <span className="absolute bottom-2 left-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                          Série
+                        </span>
+                      )}
+
+                      {item.rating && (
+                        <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur-md text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                          ★ {item.rating}
+                        </span>
+                      )}
+                    </div>
+
+                    <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
+                      {item.name}
+                    </h4>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </LazySection>
+      )}
+
+      {/* SECTION 10: CARROSSÉIS DE CATEGORIAS DA LISTA IPTV - Renderizados SOB DEMANDA (Lazy on Scroll) */}
       {topPlaylistCategories.map((catName) => {
-        const catMovies = movies.filter(m => m.category?.toLowerCase() === catName.toLowerCase());
-        const catSeries = series.filter(s => s.category?.toLowerCase() === catName.toLowerCase());
-        const catChannels = channels.filter(ch => ch.category?.toLowerCase() === catName.toLowerCase());
+        const k = catName.toLowerCase();
+        const catMovies = categoryIndex.movieCatMap.get(k) || [];
+        const catSeries = categoryIndex.seriesCatMap.get(k) || [];
+        const catChannels = categoryIndex.channelCatMap.get(k) || [];
 
         if (catMovies.length > 0) {
           return (
-            <section key={`top_cat_${catName}`} className="px-4 max-w-7xl mx-auto space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Film className="w-4 h-4 text-orange-400" />
-                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                    {catName}
-                  </h2>
-                  <span className="text-xs text-neutral-500 font-medium">({catMovies.length})</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab('movies')}
-                  className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-                >
-                  Ver todos <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
-                {catMovies.map(movie => (
-                  <div
-                    key={`top_cat_m_${movie.id}`}
-                    onClick={() => onSelectMovie(movie)}
-                    className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-amber-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
-                  >
-                    <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
-                      {movie.posterUrl ? (
-                        <img src={movie.posterUrl} alt={movie.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Film className="w-8 h-8" /></div>
-                      )}
-                      {movie.year && (
-                        <span className="absolute top-2 left-2 bg-black/70 backdrop-blur-md text-white text-[9px] font-bold px-1.5 py-0.5 rounded">{movie.year}</span>
-                      )}
-                    </div>
-                    <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{movie.name}</h4>
+            <LazySection key={`top_cat_${catName}`} minHeight="260px" rootMargin="350px">
+              <section className="px-4 max-w-7xl mx-auto space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Film className="w-4 h-4 text-orange-400" />
+                    <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                      {catName}
+                    </h2>
+                    <span className="text-xs text-neutral-500 font-medium">({catMovies.length})</span>
                   </div>
-                ))}
-              </div>
-            </section>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('movies')}
+                    className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    Ver todos <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                  {catMovies.slice(0, 20).map(movie => (
+                    <div
+                      key={`top_cat_m_${movie.id}`}
+                      onClick={() => onSelectMovie(movie)}
+                      className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-amber-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                    >
+                      <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                        {movie.posterUrl ? (
+                          <img
+                            src={movie.posterUrl}
+                            alt={movie.name}
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            decoding="async"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Film className="w-8 h-8" /></div>
+                        )}
+                        {movie.year && (
+                          <span className="absolute top-2 left-2 bg-black/70 backdrop-blur-md text-white text-[9px] font-bold px-1.5 py-0.5 rounded">{movie.year}</span>
+                        )}
+                      </div>
+                      <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{movie.name}</h4>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </LazySection>
           );
         }
 
         if (catSeries.length > 0) {
           return (
-            <section key={`top_cat_${catName}`} className="px-4 max-w-7xl mx-auto space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clapperboard className="w-4 h-4 text-rose-400" />
-                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                    {catName}
-                  </h2>
-                  <span className="text-xs text-neutral-500 font-medium">({catSeries.length})</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab('series')}
-                  className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-                >
-                  Ver todos <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
-                {catSeries.map(s => (
-                  <div
-                    key={`top_cat_s_${s.id}`}
-                    onClick={() => onSelectSeries(s)}
-                    className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-rose-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
-                  >
-                    <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
-                      {s.posterUrl ? (
-                        <img src={s.posterUrl} alt={s.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Clapperboard className="w-8 h-8" /></div>
-                      )}
-                      <span className="absolute bottom-2 right-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
-                        {s.seasons?.length || 1} Temp
-                      </span>
-                    </div>
-                    <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{s.name}</h4>
+            <LazySection key={`top_cat_${catName}`} minHeight="260px" rootMargin="350px">
+              <section className="px-4 max-w-7xl mx-auto space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Clapperboard className="w-4 h-4 text-rose-400" />
+                    <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                      {catName}
+                    </h2>
+                    <span className="text-xs text-neutral-500 font-medium">({catSeries.length})</span>
                   </div>
-                ))}
-              </div>
-            </section>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('series')}
+                    className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    Ver todos <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                  {catSeries.slice(0, 20).map(s => (
+                    <div
+                      key={`top_cat_s_${s.id}`}
+                      onClick={() => onSelectSeries(s)}
+                      className="group relative flex-shrink-0 w-32 sm:w-44 p-2 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-rose-500/50 cursor-pointer transition-all active:scale-95 shadow-md"
+                    >
+                      <div className="aspect-[2/3] w-full rounded-xl overflow-hidden bg-neutral-950 mb-2 relative">
+                        {s.posterUrl ? (
+                          <img
+                            src={s.posterUrl}
+                            alt={s.name}
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            decoding="async"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-neutral-600 bg-neutral-900"><Clapperboard className="w-8 h-8" /></div>
+                        )}
+                        <span className="absolute bottom-2 right-2 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow">
+                          {s.seasons?.length || 1} Temp
+                        </span>
+                      </div>
+                      <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{s.name}</h4>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </LazySection>
           );
         }
 
         if (catChannels.length > 0) {
           return (
-            <section key={`top_cat_${catName}`} className="px-4 max-w-7xl mx-auto space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Tv className="w-4 h-4 text-orange-500" />
-                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                    {catName}
-                  </h2>
-                  <span className="text-xs text-neutral-500 font-medium">({catChannels.length})</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab('live')}
-                  className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1"
-                >
-                  Ver todos <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
-                {catChannels.map(ch => (
-                  <div
-                    key={`top_cat_ch_${ch.id}`}
-                    onClick={() => onPlayChannel(ch)}
-                    className="group relative flex-shrink-0 w-36 sm:w-44 p-3 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-orange-500/60 cursor-pointer transition-all active:scale-95 shadow-md"
-                  >
-                    <div className="w-full h-20 rounded-xl bg-neutral-900/90 flex items-center justify-center p-2 mb-2 relative overflow-hidden border border-neutral-800">
-                      {ch.logoUrl ? (
-                        <img src={ch.logoUrl} alt={ch.name} referrerPolicy="no-referrer" className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200" />
-                      ) : (
-                        <Tv className="w-8 h-8 text-neutral-600" />
-                      )}
-                    </div>
-                    <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{ch.name}</h4>
-                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{ch.category}</p>
+            <LazySection key={`top_cat_${catName}`} minHeight="260px" rootMargin="350px">
+              <section className="px-4 max-w-7xl mx-auto space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Tv className="w-4 h-4 text-orange-500" />
+                    <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                      {catName}
+                    </h2>
+                    <span className="text-xs text-neutral-500 font-medium">({catChannels.length})</span>
                   </div>
-                ))}
-              </div>
-            </section>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('live')}
+                    className="text-xs font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    Ver todos <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1">
+                  {catChannels.slice(0, 20).map(ch => (
+                    <div
+                      key={`top_cat_ch_${ch.id}`}
+                      onClick={() => onPlayChannel(ch)}
+                      className="group relative flex-shrink-0 w-36 sm:w-44 p-3 rounded-2xl bg-[#11131b] hover:bg-neutral-800/90 border border-neutral-800/90 hover:border-orange-500/60 cursor-pointer transition-all active:scale-95 shadow-md"
+                    >
+                      <div className="w-full h-20 rounded-xl bg-neutral-900/90 flex items-center justify-center p-2 mb-2 relative overflow-hidden border border-neutral-800">
+                        {ch.logoUrl ? (
+                          <img
+                            src={ch.logoUrl}
+                            alt={ch.name}
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            decoding="async"
+                            className="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200"
+                          />
+                        ) : (
+                          <Tv className="w-8 h-8 text-neutral-600" />
+                        )}
+                      </div>
+                      <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{ch.name}</h4>
+                      <p className="text-[10px] text-neutral-500 truncate mt-0.5">{ch.category}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </LazySection>
           );
         }
 
