@@ -483,7 +483,7 @@ fun SpotlightBannerCarousel(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(315.dp) // Largura total 100%, sem margens
+            .height(220.dp) // Largura total 100%, mais retangular na horizontal (reduzido ~30%)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -541,7 +541,7 @@ fun SpotlightBannerCarousel(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     // Tags: "FILME • ★ 0.0/5 • ★RC | Dublado | Drama"
                     val ratingStr = item.movieItem?.rating ?: item.seriesItem?.rating
@@ -551,26 +551,26 @@ fun SpotlightBannerCarousel(
 
                     Text(
                         text = tagsText,
-                        fontSize = 11.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = OrangePrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
 
                     // Título ("#Horror (Dublado) - 2015 - 1080p")
                     Text(
                         text = item.title,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = Color.White,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Botão branco "Assistir" com ícone e texto pretos
                     Button(
@@ -1756,25 +1756,136 @@ fun MoviesScreen(
             }
         }
 
-        // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable para reter o foco e manter o teclado aberto)
-        Column(
+        // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable em Row horizontal para reter o foco e economizar espaço)
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Elemento 1: Botão Categorias no formato pílula
+            Box {
+                Button(
+                    onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FilterList,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (selectedCategoryForGrid != null) {
+                            if (selectedCategoryForGrid!!.length > 8) selectedCategoryForGrid!!.take(6) + ".." else selectedCategoryForGrid!!
+                        } else "Categorias ⬇️",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showCategoriesDropdown,
+                    onDismissRequest = { showCategoriesDropdown = false },
+                    modifier = Modifier
+                        .background(Color(0xFF161924))
+                        .widthIn(min = 220.dp, max = 290.dp)
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Todas as Categorias (Carrosséis)",
+                                fontSize = 12.5.sp,
+                                fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                            )
+                        },
+                        onClick = {
+                            selectedCategoryForGrid = null
+                            showCategoriesDropdown = false
+                        }
+                    )
+                    Divider(color = Color.White.copy(alpha = 0.12f))
+                    allCategoriesList.forEach { cat ->
+                        val count = categoriesMap[cat]?.size ?: 0
+                        val isSelected = selectedCategoryForGrid == cat
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = cat,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF23283B)
+                                    ) {
+                                        Text(
+                                            text = "$count",
+                                            fontSize = 10.sp,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                selectedCategoryForGrid = cat
+                                showCategoriesDropdown = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Se uma categoria estiver selecionada, exibe o botão de voltar para limpar o filtro
+            if (selectedCategoryForGrid != null) {
+                IconButton(
+                    onClick = { selectedCategoryForGrid = null },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "Limpar filtro",
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Elemento 2: Barra de busca escura que expande no espaço horizontal restante
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Buscar em todos os filmes...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                placeholder = { Text("Buscar em todos os filmes...", fontSize = 11.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(16.dp)) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray, modifier = Modifier.size(14.dp))
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f).height(48.dp),
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -1784,111 +1895,6 @@ fun MoviesScreen(
                     unfocusedContainerColor = Color(0xFF141722)
                 )
             )
-
-            // Só exibe as categorias/retorno se o usuário não estiver buscando ativamente
-            if (searchQuery.isBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box {
-                        Button(
-                            onClick = { showCategoriesDropdown = !showCategoriesDropdown },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(50),
-                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FilterList,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = showCategoriesDropdown,
-                            onDismissRequest = { showCategoriesDropdown = false },
-                            modifier = Modifier
-                                .background(Color(0xFF161924))
-                                .widthIn(min = 220.dp, max = 290.dp)
-                        ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Todas as Categorias (Carrosséis)",
-                                        fontSize = 12.5.sp,
-                                        fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
-                                    )
-                                },
-                                onClick = {
-                                    selectedCategoryForGrid = null
-                                    showCategoriesDropdown = false
-                                }
-                            )
-                            Divider(color = Color.White.copy(alpha = 0.12f))
-                            allCategoriesList.forEach { cat ->
-                                val count = categoriesMap[cat]?.size ?: 0
-                                val isSelected = selectedCategoryForGrid == cat
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = cat,
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
-                                                modifier = Modifier.weight(1f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = Color(0xFF23283B)
-                                            ) {
-                                                Text(
-                                                    text = "$count",
-                                                    fontSize = 10.sp,
-                                                    color = Color.Gray,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        selectedCategoryForGrid = cat
-                                        showCategoriesDropdown = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    if (selectedCategoryForGrid != null) {
-                        TextButton(onClick = { selectedCategoryForGrid = null }) {
-                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
         }
 
         // ÁREA DE CONTEÚDO DINÂMICA
@@ -3199,25 +3205,136 @@ fun SeriesScreen(
             }
         }
 
-        // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable para reter o foco e manter o teclado aberto)
-        Column(
+        // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable em Row horizontal para reter o foco e economizar espaço)
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Elemento 1: Botão Categorias no formato pílula
+            Box {
+                Button(
+                    onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FilterList,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (selectedCategoryForGrid != null) {
+                            if (selectedCategoryForGrid!!.length > 8) selectedCategoryForGrid!!.take(6) + ".." else selectedCategoryForGrid!!
+                        } else "Categorias ⬇️",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showCategoriesDropdown,
+                    onDismissRequest = { showCategoriesDropdown = false },
+                    modifier = Modifier
+                        .background(Color(0xFF161924))
+                        .widthIn(min = 220.dp, max = 290.dp)
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Todas as Categorias (Carrosséis)",
+                                fontSize = 12.5.sp,
+                                fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                            )
+                        },
+                        onClick = {
+                            selectedCategoryForGrid = null
+                            showCategoriesDropdown = false
+                        }
+                    )
+                    Divider(color = Color.White.copy(alpha = 0.12f))
+                    allCategoriesList.forEach { cat ->
+                        val count = categoriesMap[cat]?.size ?: 0
+                        val isSelected = selectedCategoryForGrid == cat
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = cat,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF23283B)
+                                    ) {
+                                        Text(
+                                            text = "$count",
+                                            fontSize = 10.sp,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                selectedCategoryForGrid = cat
+                                showCategoriesDropdown = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Se uma categoria estiver selecionada, exibe o botão de voltar para limpar o filtro
+            if (selectedCategoryForGrid != null) {
+                IconButton(
+                    onClick = { selectedCategoryForGrid = null },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "Limpar filtro",
+                        tint = OrangePrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Elemento 2: Barra de busca escura que expande no espaço horizontal restante
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Buscar em todas as séries...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                placeholder = { Text("Buscar em todas as séries...", fontSize = 11.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(16.dp)) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray, modifier = Modifier.size(14.dp))
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f).height(48.dp),
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -3227,111 +3344,6 @@ fun SeriesScreen(
                     unfocusedContainerColor = Color(0xFF141722)
                 )
             )
-
-            // Só exibe as categorias/retorno se o usuário não estiver buscando ativamente
-            if (searchQuery.isBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box {
-                        Button(
-                            onClick = { showCategoriesDropdown = !showCategoriesDropdown },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(50),
-                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FilterList,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = showCategoriesDropdown,
-                            onDismissRequest = { showCategoriesDropdown = false },
-                            modifier = Modifier
-                                .background(Color(0xFF161924))
-                                .widthIn(min = 220.dp, max = 290.dp)
-                        ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Todas as Categorias (Carrosséis)",
-                                        fontSize = 12.5.sp,
-                                        fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
-                                    )
-                                },
-                                onClick = {
-                                    selectedCategoryForGrid = null
-                                    showCategoriesDropdown = false
-                                }
-                            )
-                            Divider(color = Color.White.copy(alpha = 0.12f))
-                            allCategoriesList.forEach { cat ->
-                                val count = categoriesMap[cat]?.size ?: 0
-                                val isSelected = selectedCategoryForGrid == cat
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = cat,
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
-                                                modifier = Modifier.weight(1f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = Color(0xFF23283B)
-                                            ) {
-                                                Text(
-                                                    text = "$count",
-                                                    fontSize = 10.sp,
-                                                    color = Color.Gray,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        selectedCategoryForGrid = cat
-                                        showCategoriesDropdown = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    if (selectedCategoryForGrid != null) {
-                        TextButton(onClick = { selectedCategoryForGrid = null }) {
-                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
         }
 
         // ÁREA DE CONTEÚDO DINÂMICA

@@ -142,7 +142,7 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
           onMouseLeave={() => setIsFeaturedPaused(false)}
           onTouchStart={() => setIsFeaturedPaused(true)}
           onTouchEnd={() => setIsFeaturedPaused(false)}
-          className="relative w-full h-72 sm:h-96 md:h-[430px] rounded-none overflow-hidden bg-black select-none border-b border-neutral-900"
+          className="relative w-full h-48 sm:h-64 md:h-[300px] rounded-none overflow-hidden bg-black select-none border-b border-neutral-900"
         >
           {(() => {
             const currentMovie = featuredMovies[currentFeaturedIndex] || featuredMovies[0];
@@ -230,21 +230,107 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
       )}
 
       {/* 2. BUSCA E CATEGORIAS:
-          - Colocados diretamente ABAIXO do banner em destaque
-          - Primeiro elemento: Uma barra de busca escura arredondada
-          - Segundo elemento: Um botão no formato pílula "Categorias"
+          - Colocados diretamente ABAIXO do banner em destaque, alinhados na mesma linha
+          - Categorias na esquerda e Busca na direita
       */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
-        <div className="space-y-3">
-          {/* Primeiro elemento: Barra de busca escura arredondada */}
-          <div className="relative w-full">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-4 top-1/2 -translate-y-1/2" />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 z-30 relative">
+        <div className="flex flex-row items-center gap-3 relative z-30 w-full">
+          {/* Elemento 1: Botão no formato pílula "Categorias" com menu cascata */}
+          <div className="relative shrink-0" ref={dropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer h-10 ${
+                selectedCategoryForGrid
+                  ? 'bg-amber-500 text-black shadow-amber-950/40'
+                  : 'bg-[#121520] border border-neutral-800 text-white hover:border-neutral-700'
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>
+                {selectedCategoryForGrid
+                  ? `Cat: ${selectedCategoryForGrid}`
+                  : 'Categorias ⬇️'}
+              </span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                  isDropdownOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {/* Menu em cascata com todas as categorias disponíveis na lista IPTV */}
+            {isDropdownOpen && (
+              <div className="absolute left-0 mt-2 w-72 sm:w-80 max-h-96 overflow-y-auto bg-[#121520] border border-neutral-800 rounded-2xl shadow-2xl p-2 space-y-1 no-scrollbar animate-in fade-in zoom-in-95 duration-150 z-40">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategoryForGrid(null);
+                    setIsDropdownOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                    selectedCategoryForGrid === null
+                      ? 'bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30'
+                      : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white'
+                  }`}
+                >
+                  <span>Todas as Categorias (Carrosséis)</span>
+                  <span className="text-[10px] bg-neutral-900 text-neutral-400 px-2 py-0.5 rounded-lg border border-neutral-800">
+                    {movies.length}
+                  </span>
+                </button>
+
+                <div className="h-px bg-neutral-800/80 my-1" />
+
+                {allCategories.map((cat) => {
+                  const count = categoriesMap.get(cat)?.length || 0;
+                  const isSelected = selectedCategoryForGrid === cat;
+                  return (
+                    <button
+                      key={`cat_drop_${cat}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategoryForGrid(cat);
+                        setIsDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30'
+                          : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white'
+                      }`}
+                    >
+                      <span className="truncate pr-2 text-left">{cat}</span>
+                      <span className="text-[10px] bg-neutral-900 text-neutral-400 px-2 py-0.5 rounded-lg border border-neutral-800 shrink-0">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Botão de retorno quando visualizando a grade de uma categoria */}
+          {selectedCategoryForGrid && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategoryForGrid(null)}
+              className="flex items-center gap-1.5 text-[10px] text-amber-400 hover:text-amber-300 font-semibold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-3 h-10 rounded-full transition-colors cursor-pointer shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Ver carrosséis</span>
+            </button>
+          )}
+
+          {/* Elemento 2: Barra de busca escura arredondada que se expande */}
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Buscar em todos os filmes..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#121520] border border-neutral-800 rounded-2xl pl-11 pr-10 py-3 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500 transition-colors shadow-inner"
+              className="w-full bg-[#121520] border border-neutral-800 rounded-full pl-10 pr-10 h-10 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500 transition-colors shadow-inner"
             />
             {searchQuery && (
               <button
@@ -252,96 +338,7 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white cursor-pointer"
               >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Segundo elemento: Botão no formato pílula "Categorias" com menu cascata */}
-          <div className="flex items-center justify-between gap-3 relative z-30">
-            <div className="relative" ref={dropdownRef}>
-              <button
-                type="button"
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer ${
-                  selectedCategoryForGrid
-                    ? 'bg-amber-500 text-black shadow-amber-950/40'
-                    : 'bg-[#161a26] border border-neutral-800 text-white hover:border-neutral-700'
-                }`}
-              >
-                <Filter className="w-3.5 h-3.5" />
-                <span>
-                  {selectedCategoryForGrid
-                    ? `Categoria: ${selectedCategoryForGrid}`
-                    : 'Categorias ⬇️'}
-                </span>
-                <ChevronDown
-                  className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                    isDropdownOpen ? 'rotate-180' : ''
-                  }`}
-                />
-              </button>
-
-              {/* Menu em cascata com todas as categorias disponíveis na lista IPTV */}
-              {isDropdownOpen && (
-                <div className="absolute left-0 mt-2 w-72 sm:w-80 max-h-96 overflow-y-auto bg-[#121520] border border-neutral-800 rounded-2xl shadow-2xl p-2 space-y-1 no-scrollbar animate-in fade-in zoom-in-95 duration-150 z-40">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCategoryForGrid(null);
-                      setIsDropdownOpen(false);
-                    }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                      selectedCategoryForGrid === null
-                        ? 'bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30'
-                        : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white'
-                    }`}
-                  >
-                    <span>Todas as Categorias (Carrosséis)</span>
-                    <span className="text-[10px] bg-neutral-900 text-neutral-400 px-2 py-0.5 rounded-lg border border-neutral-800">
-                      {movies.length}
-                    </span>
-                  </button>
-
-                  <div className="h-px bg-neutral-800/80 my-1" />
-
-                  {allCategories.map((cat) => {
-                    const count = categoriesMap.get(cat)?.length || 0;
-                    const isSelected = selectedCategoryForGrid === cat;
-                    return (
-                      <button
-                        key={`cat_drop_${cat}`}
-                        type="button"
-                        onClick={() => {
-                          setSelectedCategoryForGrid(cat);
-                          setIsDropdownOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer ${
-                          isSelected
-                            ? 'bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30'
-                            : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white'
-                        }`}
-                      >
-                        <span className="truncate pr-2 text-left">{cat}</span>
-                        <span className="text-[10px] bg-neutral-900 text-neutral-400 px-2 py-0.5 rounded-lg border border-neutral-800 shrink-0">
-                          {count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Botão de retorno quando visualizando a grade de uma categoria */}
-            {selectedCategoryForGrid && !searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSelectedCategoryForGrid(null)}
-                className="flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-semibold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-3.5 py-2 rounded-full transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Ver carrosséis</span>
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
