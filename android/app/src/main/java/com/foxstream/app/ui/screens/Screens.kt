@@ -448,6 +448,192 @@ fun HeroBannerCarousel(
 }
 
 // ==========================================
+// 1.1 SPOTLIGHT BANNER (LARGURA TOTAL 100%, BORDAS RETAS 0PX)
+// ==========================================
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun SpotlightBannerCarousel(
+    items: List<HeroBannerItem>,
+    onPlay: (String, String, ContentType) -> Unit,
+    onOpenSeries: (SeriesItem) -> Unit,
+    onOpenMovie: (MovieItem) -> Unit = {}
+) {
+    if (items.isEmpty()) return
+
+    val pagerState = rememberPagerState(pageCount = { items.size })
+    val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
+
+    // Auto-Scroll automático com intervalo de 3 segundos e pausa na interação
+    if (items.size > 1) {
+        LaunchedEffect(pagerState, isDragged, items.size) {
+            if (!isDragged) {
+                while (true) {
+                    delay(3000L)
+                    if (!isDragged) {
+                        try {
+                            val nextPage = (pagerState.currentPage + 1) % items.size
+                            pagerState.animateScrollToPage(nextPage)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(315.dp) // Largura total 100%, sem margens
+    ) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(0.dp),
+            pageSpacing = 0.dp
+        ) { page ->
+            val item = items[page]
+            val typeBadge = when (item.type) {
+                ContentType.LIVE -> "AO VIVO"
+                ContentType.MOVIE -> "FILME"
+                ContentType.SERIES -> "SÉRIE"
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable {
+                        if (item.type == ContentType.SERIES && item.seriesItem != null) {
+                            onOpenSeries(item.seriesItem)
+                        } else if (item.type == ContentType.MOVIE && item.movieItem != null) {
+                            onOpenMovie(item.movieItem)
+                        } else if (item.streamUrl.isNotBlank()) {
+                            onPlay(item.streamUrl, item.title, item.type)
+                        }
+                    }
+            ) {
+                // Imagem de largura total (100% da tela, sem margens laterais, bordas retas 0px)
+                AsyncImage(
+                    model = item.imageUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+
+                // Gradientes cinematográficos
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x22000000),
+                                    Color(0x66080A10),
+                                    Color(0xCC080A10),
+                                    Color(0xFF080A10)
+                                ),
+                                startY = 0f
+                            )
+                        )
+                )
+
+                // Textos e elementos sobrepostos na imagem do banner
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                ) {
+                    // Tags: "FILME • ★ 0.0/5 • ★RC | Dublado | Drama"
+                    val ratingStr = item.movieItem?.rating ?: item.seriesItem?.rating
+                    val ratingTag = if (!ratingStr.isNullOrBlank()) "★ $ratingStr/5" else "★ 0.0/5"
+                    val catTag = item.category.trim().takeIf { it.isNotBlank() && it != "Filmes" && it != "Séries" }
+                    val tagsText = listOfNotNull(typeBadge, ratingTag, catTag).joinToString(" • ")
+
+                    Text(
+                        text = tagsText,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = OrangePrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Título ("#Horror (Dublado) - 2015 - 1080p")
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Botão branco "Assistir" com ícone e texto pretos
+                    Button(
+                        onClick = {
+                            if (item.type == ContentType.SERIES && item.seriesItem != null) {
+                                onOpenSeries(item.seriesItem)
+                            } else if (item.type == ContentType.MOVIE && item.movieItem != null) {
+                                onOpenMovie(item.movieItem)
+                            } else if (item.streamUrl.isNotBlank()) {
+                                onPlay(item.streamUrl, item.title, item.type)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(24.dp),
+                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
+                        modifier = Modifier.height(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Assistir",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = Color.Black
+                        )
+                    }
+                }
+            }
+        }
+
+        // Pager Dots
+        if (items.size > 1) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 22.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(items.size) { index ->
+                    val isSelected = pagerState.currentPage == index
+                    Box(
+                        modifier = Modifier
+                            .height(4.dp)
+                            .width(if (isSelected) 18.dp else 5.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(if (isSelected) Color.White else Color.White.copy(alpha = 0.35f))
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
 // 2. HOME SCREEN
 // ==========================================
 @OptIn(ExperimentalFoundationApi::class)
@@ -1556,180 +1742,107 @@ fun MoviesScreen(
         selectedCategoryForGrid = null
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-    ) {
-        // Top Search Bar (Searches all movies)
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar em todos os filmes...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = OrangePrimary,
-                unfocusedBorderColor = Color(0xFF2D3245),
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface
-            )
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Categories Cascading Dropdown Bar
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Box {
-                Button(
-                    onClick = { showCategoriesDropdown = !showCategoriesDropdown },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(20.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FilterList,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = showCategoriesDropdown,
-                    onDismissRequest = { showCategoriesDropdown = false },
-                    modifier = Modifier
-                        .background(Color(0xFF161924))
-                        .widthIn(min = 220.dp, max = 290.dp)
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = "Todas as Categorias (Carrosséis)",
-                                fontSize = 12.5.sp,
-                                fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
-                            )
-                        },
-                        onClick = {
-                            selectedCategoryForGrid = null
-                            showCategoriesDropdown = false
-                        }
-                    )
-                    Divider(color = Color.White.copy(alpha = 0.12f))
-                    allCategoriesList.forEach { cat ->
-                        val count = categoriesMap[cat]?.size ?: 0
-                        val isSelected = selectedCategoryForGrid == cat
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = cat,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
-                                        modifier = Modifier.weight(1f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = Color(0xFF23283B)
-                                    ) {
-                                        Text(
-                                            text = "$count",
-                                            fontSize = 10.sp,
-                                            color = Color.Gray,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                            },
-                            onClick = {
-                                selectedCategoryForGrid = cat
-                                showCategoriesDropdown = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            if (selectedCategoryForGrid != null && searchQuery.isBlank()) {
-                TextButton(onClick = { selectedCategoryForGrid = null }) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = null,
-                        tint = OrangePrimary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Ver carrosséis",
-                        color = OrangePrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // VIEW 1: GLOBAL SEARCH RESULTS (Searches across all movies)
+    // Layout: Spotlight Banner no topo (largura total 100%, 0px bordas),
+    // seguido diretamente pela Busca e botão pílula de Categorias
+    Column(modifier = Modifier.fillMaxSize()) {
         if (searchQuery.isNotBlank()) {
-            if (searchResults.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+            // VIEW 1: SEARCH RESULTS
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                // Barra de busca escura arredondada
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Buscar em todos os filmes...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                    trailingIcon = {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = OrangePrimary,
+                        unfocusedBorderColor = Color(0xFF2D3245),
+                        focusedContainerColor = Color(0xFF141722),
+                        unfocusedContainerColor = Color(0xFF141722)
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (searchResults.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(text = "Nenhum filme encontrado para \"$searchQuery\".", color = Color.Gray)
+                    }
+                } else {
+                    Text(
+                        text = "Resultados da busca (${searchResults.size} filmes encontrados):",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(searchResults, key = { it.id }) { movie ->
+                            val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
+                            MovieGridCard(
+                                movie = movie,
+                                isFavorite = isFav,
+                                onPlay = onPlay,
+                                onOpenMovie = onOpenMovie,
+                                onToggleFavorite = onToggleFavorite
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (selectedCategoryForGrid != null) {
+            // VIEW 2: CATEGORY DETAIL ("VER TUDO" GRID)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                val catMovies = categoriesMap[selectedCategoryForGrid] ?: emptyList()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Nenhum filme encontrado para \"$searchQuery\".",
-                        color = Color.Gray
+                        text = "$selectedCategoryForGrid (${catMovies.size} filmes)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
+                    TextButton(onClick = { selectedCategoryForGrid = null }) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
-            } else {
-                Text(
-                    text = "Resultados da busca (${searchResults.size} filmes encontrados):",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 16.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(searchResults, key = { it.id }) { movie ->
+                    items(catMovies, key = { it.id }) { movie ->
                         val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
                         MovieGridCard(
                             movie = movie,
@@ -1741,83 +1854,178 @@ fun MoviesScreen(
                     }
                 }
             }
-        }
-        // VIEW 2: CATEGORY DETAIL ("VER TUDO" GRID)
-        else if (selectedCategoryForGrid != null) {
-            val catMovies = categoriesMap[selectedCategoryForGrid] ?: emptyList()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "$selectedCategoryForGrid (${catMovies.size} filmes)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+        } else {
+            // VIEW 3: MAIN VIEW
+            // 1. Banner em Destaque (Spotlight Banner): Posicionado diretamente abaixo da barra superior (100% largura, 0px bordas)
+            // 2. Busca e Categorias: Colocados diretamente ABAIXO do banner em destaque
+            // 3. Carrosséis de cada categoria
+            LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(catMovies, key = { it.id }) { movie ->
-                    val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
-                    MovieGridCard(
-                        movie = movie,
-                        isFavorite = isFav,
-                        onPlay = onPlay,
-                        onOpenMovie = onOpenMovie,
-                        onToggleFavorite = onToggleFavorite
-                    )
+                // Banner em Destaque (Spotlight Banner)
+                if (movieHeroItems.isNotEmpty()) {
+                    item(key = "spotlight_banner") {
+                        SpotlightBannerCarousel(
+                            items = movieHeroItems,
+                            onPlay = onPlay,
+                            onOpenSeries = {},
+                            onOpenMovie = onOpenMovie
+                        )
+                    }
                 }
-            }
-        }
-        // VIEW 3: CAROUSEL PER CATEGORY (MAIN VIEW)
-        else {
-            if (movies.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Nenhum filme disponível na lista.",
-                        color = Color.Gray
-                    )
+
+                // Busca e Categorias (Colocados diretamente ABAIXO do banner em destaque)
+                item(key = "search_and_categories_bar") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                    ) {
+                        // Primeiro elemento: Uma barra de busca escura arredondada
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Buscar em todos os filmes...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = Color(0xFF2D3245),
+                                focusedContainerColor = Color(0xFF141722),
+                                unfocusedContainerColor = Color(0xFF141722)
+                            )
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Segundo elemento: Um botão no formato pílula "Categorias"
+                        Box {
+                            Button(
+                                onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showCategoriesDropdown,
+                                onDismissRequest = { showCategoriesDropdown = false },
+                                modifier = Modifier
+                                    .background(Color(0xFF161924))
+                                    .widthIn(min = 220.dp, max = 290.dp)
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Todas as Categorias (Carrosséis)",
+                                            fontSize = 12.5.sp,
+                                            fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                                        )
+                                    },
+                                    onClick = {
+                                        selectedCategoryForGrid = null
+                                        showCategoriesDropdown = false
+                                    }
+                                )
+                                Divider(color = Color.White.copy(alpha = 0.12f))
+                                allCategoriesList.forEach { cat ->
+                                    val count = categoriesMap[cat]?.size ?: 0
+                                    val isSelected = selectedCategoryForGrid == cat
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = cat,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                                    modifier = Modifier.weight(1f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = Color(0xFF23283B)
+                                                ) {
+                                                    Text(
+                                                        text = "$count",
+                                                        fontSize = 10.sp,
+                                                        color = Color.Gray,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedCategoryForGrid = cat
+                                            showCategoriesDropdown = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Carrossel de Destaques de Filmes com Auto-Scroll de 3 segundos
-                    if (movieHeroItems.isNotEmpty()) {
-                        item(key = "movie_hero_banner") {
-                            Text(
-                                text = "EM DESTAQUE",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+
+                // Carrosséis por categoria
+                categoriesMap.forEach { (catName, catMovies) ->
+                    item(key = "cat_$catName") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp)
+                        ) {
+                            SectionHeaderWithAction(
+                                title = catName,
+                                actionText = "Ver tudo",
+                                onAction = { selectedCategoryForGrid = catName }
                             )
                             Spacer(modifier = Modifier.height(6.dp))
-                            HeroBannerCarousel(
-                                items = movieHeroItems,
+                            MoviesHorizontalCarousel(
+                                movies = catMovies,
+                                favorites = favorites,
                                 onPlay = onPlay,
-                                onOpenSeries = {},
-                                onOpenMovie = onOpenMovie
+                                onOpenMovie = onOpenMovie,
+                                onToggleFavorite = onToggleFavorite
                             )
                         }
                     }
-
-                    categoriesMap.forEach { (catName, catMovies) ->
+                }
+            }
+        }
+    }
                         item(key = "cat_$catName") {
                             SectionHeaderWithAction(
                                 title = catName,
@@ -1893,28 +2101,9 @@ fun MovieGridCard(
                         modifier = Modifier.size(14.dp)
                     )
                 }
-
-                // Tag de ano ou classificação se disponível
-                val badge = movie.rating ?: movie.year
-                if (!badge.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(3.dp)
-                            .background(Color.Black.copy(alpha = 0.7f), shape = RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = badge,
-                            color = OrangePrimary,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
             }
 
-            // Título compacto abaixo da imagem
+            // Título compacto abaixo da imagem (apenas o nome do filme)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1928,15 +2117,6 @@ fun MovieGridCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (movie.category.isNotBlank()) {
-                    Text(
-                        text = movie.category,
-                        fontSize = 9.sp,
-                        color = Color.Gray,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
             }
         }
     }
@@ -3064,180 +3244,103 @@ fun SeriesScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-    ) {
-        // Top Search Bar (Searches across all series)
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar em todas as séries...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = OrangePrimary,
-                unfocusedBorderColor = Color(0xFF2D3245),
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface
-            )
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Categories Cascading Dropdown Bar
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Box {
-                Button(
-                    onClick = { showCategoriesDropdown = !showCategoriesDropdown },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(20.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FilterList,
-                        modifier = Modifier.size(16.dp),
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = showCategoriesDropdown,
-                    onDismissRequest = { showCategoriesDropdown = false },
-                    modifier = Modifier
-                        .background(Color(0xFF161924))
-                        .widthIn(min = 220.dp, max = 290.dp)
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = "Todas as Categorias (Carrosséis)",
-                                fontSize = 12.5.sp,
-                                fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
-                            )
-                        },
-                        onClick = {
-                            selectedCategoryForGrid = null
-                            showCategoriesDropdown = false
-                        }
-                    )
-                    Divider(color = Color.White.copy(alpha = 0.12f))
-                    allCategoriesList.forEach { cat ->
-                        val count = categoriesMap[cat]?.size ?: 0
-                        val isSelected = selectedCategoryForGrid == cat
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = cat,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
-                                        modifier = Modifier.weight(1f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = Color(0xFF23283B)
-                                    ) {
-                                        Text(
-                                            text = "$count",
-                                            fontSize = 10.sp,
-                                            color = Color.Gray,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                            },
-                            onClick = {
-                                selectedCategoryForGrid = cat
-                                showCategoriesDropdown = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            if (selectedCategoryForGrid != null && searchQuery.isBlank()) {
-                TextButton(onClick = { selectedCategoryForGrid = null }) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = null,
-                        tint = OrangePrimary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Ver carrosséis",
-                        color = OrangePrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // VIEW 1: GLOBAL SEARCH RESULTS (Searches across all series)
+    // Layout: Spotlight Banner no topo (largura total 100%, 0px bordas),
+    // seguido diretamente pela Busca e botão pílula de Categorias
+    Column(modifier = Modifier.fillMaxSize()) {
         if (searchQuery.isNotBlank()) {
-            if (searchResults.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+            // VIEW 1: SEARCH RESULTS
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                // Barra de busca escura arredondada
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Buscar em todas as séries...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                    trailingIcon = {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = OrangePrimary,
+                        unfocusedBorderColor = Color(0xFF2D3245),
+                        focusedContainerColor = Color(0xFF141722),
+                        unfocusedContainerColor = Color(0xFF141722)
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (searchResults.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(text = "Nenhuma série encontrada para \"$searchQuery\".", color = Color.Gray)
+                    }
+                } else {
+                    Text(
+                        text = "Resultados da busca (${searchResults.size} séries encontradas):",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(searchResults, key = { it.id }) { s ->
+                            SeriesGridCard(
+                                series = s,
+                                onSelect = { onOpenSeriesItem(s) }
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (selectedCategoryForGrid != null) {
+            // VIEW 2: CATEGORY DETAIL ("VER TUDO" GRID)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                val catSeries = categoriesMap[selectedCategoryForGrid] ?: emptyList()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Nenhuma série encontrada para \"$searchQuery\".",
-                        color = Color.Gray
+                        text = "$selectedCategoryForGrid (${catSeries.size} séries)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
+                    TextButton(onClick = { selectedCategoryForGrid = null }) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = null, tint = OrangePrimary, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Ver carrosséis", color = OrangePrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
-            } else {
-                Text(
-                    text = "Resultados da busca (${searchResults.size} séries encontradas):",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 16.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(searchResults, key = { it.id }) { s ->
+                    items(catSeries, key = { it.id }) { s ->
                         SeriesGridCard(
                             series = s,
                             onSelect = { onOpenSeriesItem(s) }
@@ -3245,91 +3348,164 @@ fun SeriesScreen(
                     }
                 }
             }
-        }
-        // VIEW 2: CATEGORY DETAIL ("VER TUDO" GRID)
-        else if (selectedCategoryForGrid != null) {
-            val catSeries = categoriesMap[selectedCategoryForGrid] ?: emptyList()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "$selectedCategoryForGrid (${catSeries.size} séries)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+        } else {
+            // VIEW 3: MAIN VIEW
+            // 1. Banner em Destaque (Spotlight Banner): Posicionado diretamente abaixo da barra superior (100% largura, 0px bordas)
+            // 2. Busca e Categorias: Colocados diretamente ABAIXO do banner em destaque
+            // 3. Carrosséis de cada categoria
+            LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(catSeries, key = { it.id }) { s ->
-                    SeriesGridCard(
-                        series = s,
-                        onSelect = { onOpenSeriesItem(s) }
-                    )
+                // Banner em Destaque (Spotlight Banner)
+                if (seriesHeroItems.isNotEmpty()) {
+                    item(key = "spotlight_banner") {
+                        SpotlightBannerCarousel(
+                            items = seriesHeroItems,
+                            onPlay = { _, _, _ -> },
+                            onOpenSeries = { onOpenSeriesItem(it) },
+                            onOpenMovie = {}
+                        )
+                    }
                 }
-            }
-        }
-        // VIEW 3: CAROUSEL PER CATEGORY (MAIN VIEW)
-        else {
-            if (seriesList.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Nenhuma série disponível na lista.",
-                        color = Color.Gray
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Carrossel de Destaques de Séries com Auto-Scroll de 3 segundos
-                    if (seriesHeroItems.isNotEmpty()) {
-                        item(key = "series_hero_banner") {
-                            Text(
-                                text = "EM DESTAQUE",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+
+                // Busca e Categorias (Colocados diretamente ABAIXO do banner em destaque)
+                item(key = "search_and_categories_bar") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp)
+                    ) {
+                        // Primeiro elemento: Uma barra de busca escura arredondada
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Buscar em todas as séries...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = OrangePrimary,
+                                unfocusedBorderColor = Color(0xFF2D3245),
+                                focusedContainerColor = Color(0xFF141722),
+                                unfocusedContainerColor = Color(0xFF141722)
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            HeroBannerCarousel(
-                                items = seriesHeroItems,
-                                onPlay = { _, _, _ -> },
-                                onOpenSeries = { onOpenSeriesItem(it) },
-                                onOpenMovie = {}
-                            )
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Segundo elemento: Um botão no formato pílula "Categorias"
+                        Box {
+                            Button(
+                                onClick = { showCategoriesDropdown = !showCategoriesDropdown },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedCategoryForGrid != null) OrangePrimary else Color(0xFF1E2230),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (selectedCategoryForGrid != null) "Categoria: $selectedCategoryForGrid" else "Categorias ⬇️",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showCategoriesDropdown,
+                                onDismissRequest = { showCategoriesDropdown = false },
+                                modifier = Modifier
+                                    .background(Color(0xFF161924))
+                                    .widthIn(min = 220.dp, max = 290.dp)
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Todas as Categorias (Carrosséis)",
+                                            fontSize = 12.5.sp,
+                                            fontWeight = if (selectedCategoryForGrid == null) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (selectedCategoryForGrid == null) OrangePrimary else Color.White
+                                        )
+                                    },
+                                    onClick = {
+                                        selectedCategoryForGrid = null
+                                        showCategoriesDropdown = false
+                                    }
+                                )
+                                Divider(color = Color.White.copy(alpha = 0.12f))
+                                allCategoriesList.forEach { cat ->
+                                    val count = categoriesMap[cat]?.size ?: 0
+                                    val isSelected = selectedCategoryForGrid == cat
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = cat,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSelected) OrangePrimary else Color(0xFFDCE1EF),
+                                                    modifier = Modifier.weight(1f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = Color(0xFF23283B)
+                                                ) {
+                                                    Text(
+                                                        text = "$count",
+                                                        fontSize = 10.sp,
+                                                        color = Color.Gray,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedCategoryForGrid = cat
+                                            showCategoriesDropdown = false
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
+                }
 
-                    categoriesMap.forEach { (catName, catSeries) ->
-                        item(key = "cat_$catName") {
-                            SectionHeaderWithAction(
-                                title = catName,
-                                actionText = "Ver tudo",
-                                onAction = { selectedCategoryForGrid = catName }
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            SeriesHorizontalCarousel(
-                                seriesList = catSeries,
-                                onOpenSeries = { onOpenSeriesItem(it) }
-                            )
-                        }
+                // Carrosséis de cada categoria
+                categoriesMap.forEach { (catName, catSeries) ->
+                    item(key = "cat_$catName") {
+                        SectionHeaderWithAction(
+                            title = catName,
+                            actionText = "Ver tudo",
+                            onAction = { selectedCategoryForGrid = catName }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        SeriesHorizontalCarousel(
+                            seriesList = catSeries,
+                            onOpenSeries = { onOpenSeriesItem(it) }
+                        )
                     }
                 }
             }
@@ -3364,27 +3540,9 @@ fun SeriesGridCard(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-
-                // Tag indicadora de quantidade de temporadas se disponível
-                if (series.seasons.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(3.dp)
-                            .background(Color.Black.copy(alpha = 0.7f), shape = RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "${series.seasons.size}T",
-                            color = OrangePrimary,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
             }
 
-            // Título compacto abaixo do pôster
+            // Título compacto abaixo do pôster (apenas o nome da série)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3395,20 +3553,6 @@ fun SeriesGridCard(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 11.sp,
                     color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                val subText = if (series.seasons.isNotEmpty()) {
-                    "${series.seasons.size} Temporada${if (series.seasons.size > 1) "s" else ""}"
-                } else if (series.category.isNotBlank()) {
-                    series.category
-                } else {
-                    "Série"
-                }
-                Text(
-                    text = subText,
-                    fontSize = 9.sp,
-                    color = Color.Gray,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

@@ -505,7 +505,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             )}
                           </div>
                           <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{movie.name}</h4>
-                          <p className="text-[10px] text-neutral-500 truncate mt-0.5">{movie.category}</p>
                         </div>
                       ))}
                     </div>
@@ -549,7 +548,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                             </span>
                           </div>
                           <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{s.name}</h4>
-                          <p className="text-[10px] text-neutral-500 truncate mt-0.5">{s.category}</p>
                         </div>
                       ))}
                     </div>
@@ -942,9 +940,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
                   {movie.name}
                 </h4>
-                <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-                  {movie.category}
-                </p>
               </div>
             ))}
           </div>
@@ -1009,9 +1004,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
                   {s.name}
                 </h4>
-                <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-                  {s.category}
-                </p>
               </div>
             ))}
           </div>
@@ -1078,9 +1070,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
                   {movie.name}
                 </h4>
-                <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-                  {movie.category}
-                </p>
               </div>
             ))}
           </div>
@@ -1141,9 +1130,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
                   {s.name}
                 </h4>
-                <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-                  {s.category}
-                </p>
               </div>
             ))}
           </div>
@@ -1220,9 +1206,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">
                     {item.name}
                   </h4>
-                  <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-                    {item.category}
-                  </p>
                 </div>
               );
             })}
@@ -1274,7 +1257,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       )}
                     </div>
                     <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{movie.name}</h4>
-                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{movie.category}</p>
                   </div>
                 ))}
               </div>
@@ -1320,7 +1302,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       </span>
                     </div>
                     <h4 className="text-xs font-bold text-neutral-200 group-hover:text-white truncate">{s.name}</h4>
-                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{s.category}</p>
                   </div>
                 ))}
               </div>
