@@ -58,6 +58,7 @@ export default function App() {
   // Modals & Dialogs
   const [isAddPlaylistOpen, setIsAddPlaylistOpen] = useState<boolean>(false);
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [searchScope, setSearchScope] = useState<'ALL' | 'MOVIE' | 'SERIES'>('ALL');
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState<boolean>(false);
   const [selectedMovie, setSelectedMovie] = useState<MovieItem | null>(null);
   const [selectedSeries, setSelectedSeries] = useState<SeriesItem | null>(null);
@@ -532,7 +533,7 @@ export default function App() {
         activePlaylistId={activePlaylistId}
         onSelectPlaylist={handleSelectPlaylist}
         onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-        onOpenSearch={() => setIsSearchOpen(true)}
+        onOpenSearch={() => { setSearchScope('ALL'); setIsSearchOpen(true); }}
         onOpenPlaylists={() => setCurrentTab('playlists')}
         onOpenAndroidSource={() => setIsAndroidModalOpen(true)}
         onRefreshActivePlaylist={() => activePlaylist && handleRefreshPlaylist(activePlaylist)}
@@ -581,7 +582,7 @@ export default function App() {
               onToggleFavorite={(m) => handleToggleFavorite(m, 'movie')}
               isFavorite={isFavorite}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-              onOpenSearch={() => setIsSearchOpen(true)}
+              onOpenSearch={() => { setSearchScope('MOVIE'); setIsSearchOpen(true); }}
             />
           </div>
         )}
@@ -594,7 +595,7 @@ export default function App() {
               onToggleFavorite={(s) => handleToggleFavorite(s, 'series')}
               isFavorite={isFavorite}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
-              onOpenSearch={() => setIsSearchOpen(true)}
+              onOpenSearch={() => { setSearchScope('SERIES'); setIsSearchOpen(true); }}
             />
           </div>
         )}
@@ -674,6 +675,7 @@ export default function App() {
           onPlayChannel={handlePlayChannel}
           onSelectMovie={setSelectedMovie}
           onSelectSeries={setSelectedSeries}
+          searchScope={searchScope}
         />
       )}
 

@@ -483,7 +483,7 @@ fun SpotlightBannerCarousel(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(135.dp) // Largura total 100%, mais retangular na horizontal (reduzido mais 30% conforme solicitado)
+            .height(160.dp) // Largura total 100%, mais retangular na horizontal (ajustado +20% conforme solicitado)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -3870,8 +3870,29 @@ fun GlobalSearchScreen(
     searchEpisodes: List<Pair<SeriesItem, EpisodeItem>>,
     onPlay: (String, String, ContentType) -> Unit,
     onOpenMovie: (MovieItem) -> Unit = {},
+    searchScope: String = "ALL", // "ALL", "MOVIE", "SERIES"
     onClose: () -> Unit
 ) {
+    val placeholderText = when (searchScope) {
+        "MOVIE" -> "Buscar em filmes..."
+        "SERIES" -> "Buscar em séries..."
+        else -> "Buscar TV, Filmes, Séries e Episódios..."
+    }
+
+    val emptyText = when (searchScope) {
+        "MOVIE" -> "Digite algo para buscar em filmes"
+        "SERIES" -> "Digite algo para buscar em séries"
+        else -> "Digite algo para buscar no catálogo"
+    }
+
+    // Determine if we actually have any matched results shown for the current searchScope
+    val showChannels = searchScope == "ALL" && searchChannels.isNotEmpty()
+    val showMovies = (searchScope == "ALL" || searchScope == "MOVIE") && searchMovies.isNotEmpty()
+    val showSeries = (searchScope == "ALL" || searchScope == "SERIES") && searchSeries.isNotEmpty()
+    val showEpisodes = (searchScope == "ALL" || searchScope == "SERIES") && searchEpisodes.isNotEmpty()
+
+    val hasResults = showChannels || showMovies || showSeries || showEpisodes
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -3888,7 +3909,7 @@ fun GlobalSearchScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                placeholder = { Text("Buscar TV, Filmes, Séries e Episódios...") },
+                placeholder = { Text(placeholderText) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(16.dp),
@@ -3910,10 +3931,10 @@ fun GlobalSearchScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.Gray)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Digite algo para buscar no catálogo", color = Color.Gray)
+                    Text(emptyText, color = Color.Gray)
                 }
             }
-        } else if (searchChannels.isEmpty() && searchMovies.isEmpty() && searchSeries.isEmpty() && searchEpisodes.isEmpty()) {
+        } else if (!hasResults) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Nenhum resultado encontrado.", color = Color.Gray)
             }
@@ -3922,7 +3943,7 @@ fun GlobalSearchScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                if (searchChannels.isNotEmpty()) {
+                if (showChannels) {
                     item {
                         Text("TV ao Vivo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
@@ -3950,7 +3971,7 @@ fun GlobalSearchScreen(
                     }
                 }
 
-                if (searchMovies.isNotEmpty()) {
+                if (showMovies) {
                     item {
                         Text("Filmes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
@@ -3980,7 +4001,7 @@ fun GlobalSearchScreen(
                     }
                 }
 
-                if (searchSeries.isNotEmpty()) {
+                if (showSeries) {
                     item {
                         Text("Séries", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
@@ -4013,7 +4034,7 @@ fun GlobalSearchScreen(
                     }
                 }
 
-                if (searchEpisodes.isNotEmpty()) {
+                if (showEpisodes) {
                     item {
                         Text("Episódios", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }

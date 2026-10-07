@@ -11,6 +11,7 @@ interface SearchModalProps {
   onPlayChannel: (channel: LiveChannel) => void;
   onSelectMovie: (movie: MovieItem) => void;
   onSelectSeries: (series: SeriesItem) => void;
+  searchScope?: 'ALL' | 'MOVIE' | 'SERIES';
 }
 
 export const SearchModal: React.FC<SearchModalProps> = ({
@@ -21,7 +22,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   series,
   onPlayChannel,
   onSelectMovie,
-  onSelectSeries
+  onSelectSeries,
+  searchScope = 'ALL'
 }) => {
   const [query, setQuery] = useState('');
 
@@ -37,27 +39,33 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       };
     }
 
-    const matchedChannels = (channels || []).filter(c =>
-      c && (
-        (c.name || '').toLowerCase().includes(trimmed) ||
-        (c.category || '').toLowerCase().includes(trimmed)
-      )
-    ).slice(0, 10);
+    const matchedChannels = searchScope === 'ALL'
+      ? (channels || []).filter(c =>
+          c && (
+            (c.name || '').toLowerCase().includes(trimmed) ||
+            (c.category || '').toLowerCase().includes(trimmed)
+          )
+        ).slice(0, 10)
+      : [];
 
-    const matchedMovies = (movies || []).filter(m =>
-      m && (
-        (m.name || '').toLowerCase().includes(trimmed) ||
-        (m.category || '').toLowerCase().includes(trimmed) ||
-        (m.year && String(m.year).includes(trimmed))
-      )
-    ).slice(0, 10);
+    const matchedMovies = (searchScope === 'ALL' || searchScope === 'MOVIE')
+      ? (movies || []).filter(m =>
+          m && (
+            (m.name || '').toLowerCase().includes(trimmed) ||
+            (m.category || '').toLowerCase().includes(trimmed) ||
+            (m.year && String(m.year).includes(trimmed))
+          )
+        ).slice(0, 10)
+      : [];
 
-    const matchedSeries = (series || []).filter(s =>
-      s && (
-        (s.name || '').toLowerCase().includes(trimmed) ||
-        (s.category || '').toLowerCase().includes(trimmed)
-      )
-    ).slice(0, 10);
+    const matchedSeries = (searchScope === 'ALL' || searchScope === 'SERIES')
+      ? (series || []).filter(s =>
+          s && (
+            (s.name || '').toLowerCase().includes(trimmed) ||
+            (s.category || '').toLowerCase().includes(trimmed)
+          )
+        ).slice(0, 10)
+      : [];
 
     return {
       channels: matchedChannels,
@@ -65,9 +73,21 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       series: matchedSeries,
       total: matchedChannels.length + matchedMovies.length + matchedSeries.length
     };
-  }, [channels, movies, series, trimmed]);
+  }, [channels, movies, series, trimmed, searchScope]);
 
   if (!isOpen) return null;
+
+  const placeholderText = searchScope === 'MOVIE'
+    ? 'Pesquisar apenas em filmes...'
+    : searchScope === 'SERIES'
+    ? 'Pesquisar apenas em séries...'
+    : 'Pesquisar canais, filmes, séries e episódios...';
+
+  const emptyText = searchScope === 'MOVIE'
+    ? 'Digite o nome de um filme para pesquisar no catálogo.'
+    : searchScope === 'SERIES'
+    ? 'Digite o nome de uma série para pesquisar no catálogo.'
+    : 'Digite o nome de um canal ao vivo, filme ou série para pesquisar globalmente no catálogo.';
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
@@ -77,7 +97,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           <Search className="w-5 h-5 text-orange-500 shrink-0" />
           <input
             type="text"
-            placeholder="Pesquisar canais, filmes, séries e episódios..."
+            placeholder={placeholderText}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -105,7 +125,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-6">
           {!trimmed ? (
             <div className="py-12 text-center text-neutral-500 text-xs">
-              Digite o nome de um canal ao vivo, filme ou série para pesquisar globalmente no catálogo.
+              {emptyText}
             </div>
           ) : results.total === 0 ? (
             <div className="py-12 text-center text-neutral-400 text-xs">

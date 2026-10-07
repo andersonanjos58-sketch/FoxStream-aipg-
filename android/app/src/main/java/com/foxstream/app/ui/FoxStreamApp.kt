@@ -65,6 +65,7 @@ fun FoxStreamApp(
     var currentTab by remember { mutableStateOf(AppNavTab.HOME) }
     var showAddPlaylistDialog by remember { mutableStateOf(false) }
     var showSearchScreen by remember { mutableStateOf(false) }
+    var searchScope by remember { mutableStateOf("ALL") } // "ALL", "MOVIE", "SERIES"
     var activePlayingMedia by remember { mutableStateOf<PlayingMedia?>(null) }
     var selectedSeriesForDetails by remember { mutableStateOf<SeriesItem?>(null) }
     var selectedMovieForDetails by remember { mutableStateOf<MovieItem?>(null) }
@@ -185,7 +186,7 @@ fun FoxStreamApp(
                                 }
                             }
                             Row {
-                                IconButton(onClick = { showSearchScreen = true }) {
+                                IconButton(onClick = { searchScope = "ALL"; showSearchScreen = true }) {
                                     Icon(
                                         imageVector = Icons.Default.Search,
                                         contentDescription = "Buscar Global",
@@ -365,7 +366,7 @@ fun FoxStreamApp(
                         onToggleFavorite = { movie ->
                             viewModel.toggleFavoriteMovie(movie)
                         },
-                        onTriggerSearch = { showSearchScreen = true }
+                        onTriggerSearch = { searchScope = "MOVIE"; showSearchScreen = true }
                     )
                     AppNavTab.SERIES -> SeriesScreen(
                         seriesList = seriesList,
@@ -378,7 +379,7 @@ fun FoxStreamApp(
                         onLoadDetails = { s, callback ->
                             viewModel.getSeriesDetailsOnDemand(s, callback)
                         },
-                        onTriggerSearch = { showSearchScreen = true }
+                        onTriggerSearch = { searchScope = "SERIES"; showSearchScreen = true }
                     )
                     AppNavTab.FAVORITES -> FavoritesScreen(
                         favorites = favorites,
@@ -434,6 +435,7 @@ fun FoxStreamApp(
                             val route = NavDestinations.buildMovieDetailsRoute(movie.id)
                             navigateToRoute(route)
                         },
+                        searchScope = searchScope,
                         onClose = {
                             showSearchScreen = false
                             viewModel.onSearchQueryChanged("")

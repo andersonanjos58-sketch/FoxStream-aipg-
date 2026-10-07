@@ -147,7 +147,7 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
           onMouseLeave={() => setIsFeaturedPaused(false)}
           onTouchStart={() => setIsFeaturedPaused(true)}
           onTouchEnd={() => setIsFeaturedPaused(false)}
-          className="relative w-full h-28 sm:h-36 md:h-[180px] rounded-none overflow-hidden bg-black select-none border-b border-neutral-900"
+          className="relative w-full h-32 sm:h-44 md:h-[215px] rounded-none overflow-hidden bg-black select-none border-b border-neutral-900"
         >
           {(() => {
             const currentItem = featuredSeries[currentFeaturedIndex] || featuredSeries[0];
