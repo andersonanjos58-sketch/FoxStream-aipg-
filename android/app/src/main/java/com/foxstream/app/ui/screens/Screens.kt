@@ -2026,26 +2026,6 @@ fun MoviesScreen(
             }
         }
     }
-                        item(key = "cat_$catName") {
-                            SectionHeaderWithAction(
-                                title = catName,
-                                actionText = "Ver tudo",
-                                onAction = { selectedCategoryForGrid = catName }
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            MoviesHorizontalCarousel(
-                                movies = catMovies,
-                                favorites = favorites,
-                                onPlay = onPlay,
-                                onOpenMovie = onOpenMovie,
-                                onToggleFavorite = onToggleFavorite
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable
