@@ -76,6 +76,19 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
     val popularSeries = mutableStateListOf<SeriesItem>()
     val newReleases = mutableStateListOf<MovieItem>()
 
+    // Pre-computed HomeScreen carousels and previews to eliminate main-thread lag
+    val homeCategoryCarousels = mutableStateListOf<CategoryCarouselItem>()
+    val homePreviewMovies = mutableStateListOf<MovieItem>()
+    val homePreviewSeries = mutableStateListOf<SeriesItem>()
+    val favoriteIdsSet = mutableStateOf<Set<String>>(emptySet())
+
+    // High-performance background search index structures (Zero runtime GC allocations)
+    private val searchIndexLock = Any()
+    private val indexedChannels = mutableListOf<Pair<LiveChannel, String>>()
+    private val indexedMovies = mutableListOf<Pair<MovieItem, String>>()
+    private val indexedSeries = mutableListOf<Pair<SeriesItem, String>>()
+    private val indexedEpisodes = mutableListOf<Pair<Pair<SeriesItem, EpisodeItem>, String>>()
+
     init {
         loadInitialData()
         refreshFeaturedBanners(forceRefresh = true)
@@ -96,6 +109,7 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             }
             favorites.clear()
             favorites.addAll(allFavs)
+            favoriteIdsSet.value = allFavs.mapNotNull { it.contentId }.toSet()
 
             // Clean up and load history
             val allHist = withContext(Dispatchers.IO) {
@@ -146,6 +160,89 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
 
                 seriesList.clear()
                 seriesList.addAll(pSeries)
+
+                // 1. Asynchronously pre-compute search index and Home carousels in background (Zero UI thread work)
+                viewModelScope.launch(Dispatchers.Default) {
+                    // Pre-build Search Index
+                    val chIdx = pChannels.map { it to SearchUtils.fastNormalize("${it.name} ${it.category}") }
+                    val mvIdx = pMovies.map { it to SearchUtils.fastNormalize("${it.name} ${it.category} ${it.year ?: ""}") }
+                    val srIdx = pSeries.map { it to SearchUtils.fastNormalize("${it.name} ${it.category}") }
+                    val epIdx = mutableListOf<Pair<Pair<SeriesItem, EpisodeItem>, String>>()
+                    for (s in pSeries) {
+                        val normSeries = SearchUtils.fastNormalize(s.name)
+                        for (season in s.seasons) {
+                            for (ep in season.episodes) {
+                                epIdx.add((s to ep) to "$normSeries ${SearchUtils.fastNormalize(ep.title)}")
+                            }
+                        }
+                    }
+                    synchronized(searchIndexLock) {
+                        indexedChannels.clear()
+                        indexedChannels.addAll(chIdx)
+                        indexedMovies.clear()
+                        indexedMovies.addAll(mvIdx)
+                        indexedSeries.clear()
+                        indexedSeries.addAll(srIdx)
+                        indexedEpisodes.clear()
+                        indexedEpisodes.addAll(epIdx)
+                    }
+
+                    // Pre-compute Category Carousels & Previews for HomeScreen
+                    val catsWithCounts = mutableMapOf<String, Int>()
+                    pMovies.forEach { m ->
+                        val c = m.category.trim()
+                        if (c.isNotBlank() && !c.equals("Filmes", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
+                            catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
+                        }
+                    }
+                    pSeries.forEach { s ->
+                        val c = s.category.trim()
+                        if (c.isNotBlank() && !c.equals("Séries", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
+                            catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
+                        }
+                    }
+                    pChannels.forEach { ch ->
+                        val c = ch.category.trim()
+                        if (c.isNotBlank() && !c.equals("Canais", ignoreCase = true) && !c.equals("TV ao Vivo", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
+                            catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
+                        }
+                    }
+                    val topCats = catsWithCounts.entries.sortedByDescending { it.value }.map { it.key }.take(12)
+
+                    val moviesByCat = pMovies.groupBy { it.category.trim().lowercase() }
+                    val seriesByCat = pSeries.groupBy { it.category.trim().lowercase() }
+                    val channelsByCat = pChannels.groupBy { it.category.trim().lowercase() }
+
+                    val carousels = topCats.mapNotNull { catName ->
+                        val key = catName.lowercase()
+                        val cMovies = moviesByCat[key]?.take(25) ?: emptyList()
+                        if (cMovies.isNotEmpty()) {
+                            CategoryCarouselItem(title = catName, type = ContentType.MOVIE, movies = cMovies)
+                        } else {
+                            val cSeries = seriesByCat[key]?.take(25) ?: emptyList()
+                            if (cSeries.isNotEmpty()) {
+                                CategoryCarouselItem(title = catName, type = ContentType.SERIES, series = cSeries)
+                            } else {
+                                val cChannels = channelsByCat[key]?.take(25) ?: emptyList()
+                                if (cChannels.isNotEmpty()) {
+                                    CategoryCarouselItem(title = catName, type = ContentType.LIVE, channels = cChannels)
+                                } else null
+                            }
+                        }
+                    }
+
+                    val previewM = pMovies.take(30)
+                    val previewS = pSeries.take(30)
+
+                    withContext(Dispatchers.Main) {
+                        homeCategoryCarousels.clear()
+                        homeCategoryCarousels.addAll(carousels)
+                        homePreviewMovies.clear()
+                        homePreviewMovies.addAll(previewM)
+                        homePreviewSeries.clear()
+                        homePreviewSeries.addAll(previewS)
+                    }
+                }
 
                 // Asynchronously index titles for O(1) instant lookup
                 viewModelScope.launch(Dispatchers.IO) {
@@ -1217,7 +1314,7 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun onSearchQueryChanged(query: String) {
+    fun onSearchQueryChanged(query: String, scope: String = "ALL") {
         searchQuery = query
         searchJob?.cancel()
         if (query.isBlank()) {
@@ -1231,7 +1328,7 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
 
         searchJob = viewModelScope.launch {
             isSearching = true
-            delay(300)
+            delay(50) // Ultra-responsive 50ms debounce
             
             val tokens = SearchUtils.extractTokens(query)
             if (tokens.isEmpty()) {
@@ -1244,27 +1341,100 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             }
             
             val (filteredChannels, filteredMovies, filteredSeries, filteredEpisodes) = withContext(Dispatchers.Default) {
-                val chs = channels.filter {
-                    SearchUtils.matchesAnyField(tokens, it.name, it.category)
+                var chSnapshot: List<Pair<LiveChannel, String>>
+                var mvSnapshot: List<Pair<MovieItem, String>>
+                var srSnapshot: List<Pair<SeriesItem, String>>
+                var epSnapshot: List<Pair<Pair<SeriesItem, EpisodeItem>, String>>
+
+                synchronized(searchIndexLock) {
+                    if (indexedChannels.isEmpty() && channels.isNotEmpty()) {
+                        indexedChannels.addAll(channels.map { it to SearchUtils.fastNormalize("${it.name} ${it.category}") })
+                    }
+                    if (indexedMovies.isEmpty() && movies.isNotEmpty()) {
+                        indexedMovies.addAll(movies.map { it to SearchUtils.fastNormalize("${it.name} ${it.category} ${it.year ?: ""}") })
+                    }
+                    if (indexedSeries.isEmpty() && seriesList.isNotEmpty()) {
+                        indexedSeries.addAll(seriesList.map { it to SearchUtils.fastNormalize("${it.name} ${it.category}") })
+                    }
+                    chSnapshot = indexedChannels.toList()
+                    mvSnapshot = indexedMovies.toList()
+                    srSnapshot = indexedSeries.toList()
+                    epSnapshot = indexedEpisodes.toList()
                 }
-                val mvs = movies.filter {
-                    SearchUtils.matchesAnyField(tokens, it.name, it.category)
-                }
-                val srs = seriesList.filter {
-                    SearchUtils.matchesAnyField(tokens, it.name, it.category)
-                }
-                val eps = mutableListOf<Pair<SeriesItem, EpisodeItem>>()
-                for (series in seriesList) {
-                    for (season in series.seasons) {
-                        for (ep in season.episodes) {
-                            if (SearchUtils.matchesAnyField(tokens, ep.title, series.name)) {
-                                eps.add(series to ep)
+
+                val chs = if (scope == "ALL") {
+                    val list = mutableListOf<LiveChannel>()
+                    for ((ch, key) in chSnapshot) {
+                        var match = true
+                        for (token in tokens) {
+                            if (!key.contains(token)) {
+                                match = false
+                                break
                             }
                         }
+                        if (match) {
+                            list.add(ch)
+                            if (list.size >= 50) break
+                        }
                     }
-                }
+                    list
+                } else emptyList()
+
+                val mvs = if (scope == "ALL" || scope == "MOVIE") {
+                    val list = mutableListOf<MovieItem>()
+                    for ((m, key) in mvSnapshot) {
+                        var match = true
+                        for (token in tokens) {
+                            if (!key.contains(token)) {
+                                match = false
+                                break
+                            }
+                        }
+                        if (match) {
+                            list.add(m)
+                            if (list.size >= 50) break
+                        }
+                    }
+                    list
+                } else emptyList()
+
+                val srs = if (scope == "ALL" || scope == "SERIES") {
+                    val list = mutableListOf<SeriesItem>()
+                    for ((s, key) in srSnapshot) {
+                        var match = true
+                        for (token in tokens) {
+                            if (!key.contains(token)) {
+                                match = false
+                                break
+                            }
+                        }
+                        if (match) {
+                            list.add(s)
+                            if (list.size >= 50) break
+                        }
+                    }
+                    list
+                } else emptyList()
+
+                val eps = if (scope == "ALL" || scope == "SERIES") {
+                    val list = mutableListOf<Pair<SeriesItem, EpisodeItem>>()
+                    for ((pair, key) in epSnapshot) {
+                        var match = true
+                        for (token in tokens) {
+                            if (!key.contains(token)) {
+                                match = false
+                                break
+                            }
+                        }
+                        if (match) {
+                            list.add(pair)
+                            if (list.size >= 50) break
+                        }
+                    }
+                    list
+                } else emptyList()
                 
-                Quadruple(chs.take(100), mvs.take(100), srs.take(100), eps.take(100))
+                Quadruple(chs, mvs, srs, eps)
             }
 
             searchChannels.clear()
@@ -1603,8 +1773,11 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         val allFavs = withContext(Dispatchers.IO) {
             db.favoriteDao().getAllFavorites()
         }
-        favorites.clear()
-        favorites.addAll(allFavs)
+        withContext(Dispatchers.Main) {
+            favorites.clear()
+            favorites.addAll(allFavs)
+            favoriteIdsSet.value = allFavs.mapNotNull { it.contentId }.toSet()
+        }
     }
 
     private suspend fun refreshHistory() {

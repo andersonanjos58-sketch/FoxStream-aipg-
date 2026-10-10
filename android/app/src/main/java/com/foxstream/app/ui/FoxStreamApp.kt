@@ -306,121 +306,15 @@ fun FoxStreamApp(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                when (currentTab) {
-                    AppNavTab.HOME -> HomeScreen(
-                        playlists = playlists,
-                        activePlaylistId = activePlaylistId,
-                        history = if (continueWatching.isNotEmpty()) continueWatching else history.filter { !it.isWatched && it.type != ContentType.LIVE && it.playbackPosition > 3000L },
-                        favorites = favorites,
-                        channels = channels,
-                        movies = movies,
-                        seriesList = seriesList,
-                        popularMovies = viewModel.popularMovies,
-                        popularSeries = viewModel.popularSeries,
-                        newReleases = viewModel.newReleases,
-                        trendingMovies = viewModel.trendingMovies,
-                        featuredBannerItems = viewModel.featuredBannerItems,
-                        isLoading = viewModel.isLoading,
-                        onPlay = onPlayStream,
-                        onNavigate = { currentTab = it },
-                        onOpenAdd = { showAddPlaylistDialog = true },
-                        onToggleFavoriteChannel = { viewModel.toggleFavoriteChannel(it) },
-                        onToggleFavoriteMovie = { viewModel.toggleFavoriteMovie(it) },
-                        onOpenSeries = { s ->
-                            selectedSeriesForDetails = s
-                            currentTab = AppNavTab.SERIES
-                        },
-                        onOpenMovie = { movie: MovieItem ->
-                            if (movie.id.startsWith("series_") || movie.id.startsWith("-")) {
-                                val sId = movie.id.removePrefix("series_").removePrefix("-")
-                                val s = seriesList.find { it.id == sId }
-                                if (s != null) {
-                                    selectedSeriesForDetails = s
-                                    currentTab = AppNavTab.SERIES
-                                }
-                            } else {
-                                val route = NavDestinations.buildMovieDetailsRoute(movie.id)
-                                navigateToRoute(route)
-                            }
-                        },
-                        onRemoveHistory = { item ->
-                            viewModel.removeHistoryItem(item)
-                        }
-                    )
-                    AppNavTab.LIVE -> LiveTvScreen(
-                        channels = channels,
-                        favorites = favorites,
-                        onPlay = onPlayStream,
-                        onToggleFavorite = { channel ->
-                            viewModel.toggleFavoriteChannel(channel)
-                        }
-                    )
-                    AppNavTab.MOVIES -> MoviesScreen(
-                        movies = movies,
-                        favorites = favorites,
-                        onPlay = onPlayStream,
-                        onOpenMovie = { movie ->
-                            val route = NavDestinations.buildMovieDetailsRoute(movie.id)
-                            navigateToRoute(route)
-                        },
-                        onToggleFavorite = { movie ->
-                            viewModel.toggleFavoriteMovie(movie)
-                        },
-                        onTriggerSearch = { searchScope = "MOVIE"; showSearchScreen = true }
-                    )
-                    AppNavTab.SERIES -> SeriesScreen(
-                        seriesList = seriesList,
-                        initialSeries = selectedSeriesForDetails,
-                        onClearInitialSeries = { selectedSeriesForDetails = null },
-                        history = history,
-                        onPlayEpisode = { s, ep ->
-                            playMedia(ep.streamUrl, "${s.name} - ${ep.title}", ContentType.SERIES, s, ep)
-                        },
-                        onLoadDetails = { s, callback ->
-                            viewModel.getSeriesDetailsOnDemand(s, callback)
-                        },
-                        onTriggerSearch = { searchScope = "SERIES"; showSearchScreen = true }
-                    )
-                    AppNavTab.FAVORITES -> FavoritesScreen(
-                        favorites = favorites,
-                        onPlayFavorite = { fav ->
-                            if (fav.type == ContentType.MOVIE) {
-                                val matched = movies.find { it.streamUrl == fav.streamUrl || it.id == fav.contentId }
-                                if (matched != null) {
-                                    val route = NavDestinations.buildMovieDetailsRoute(matched.id)
-                                    navigateToRoute(route)
-                                } else {
-                                    fav.streamUrl?.let { onPlayStream(it, fav.title, fav.type) }
-                                }
-                            } else {
-                                fav.streamUrl?.let { onPlayStream(it, fav.title, fav.type) }
-                            }
-                        },
-                        onRemove = { favoriteItem ->
-                            viewModel.removeFavorite(favoriteItem)
-                        }
-                    )
-                    AppNavTab.PLAYLISTS -> PlaylistsScreen(
-                        playlists = playlists,
-                        activePlaylistId = activePlaylistId,
-                        onSelect = { viewModel.selectPlaylist(it) },
-                        onOpenAdd = { showAddPlaylistDialog = true },
-                        onDelete = { viewModel.deletePlaylist(it) },
-                        onRename = { id, newName -> viewModel.renamePlaylist(id, newName) },
-                        onUpdatePlaylist = { id -> viewModel.updatePlaylist(id) },
-                        onUpdateAll = { viewModel.updateAllPlaylists() }
-                    )
-                    AppNavTab.SETTINGS -> SettingsScreen(
-                        onClearCache = {
-                            viewModel.clearLocalCache()
-                        }
-                    )
+                val homeHistory = remember(continueWatching, history) {
+                    if (continueWatching.isNotEmpty()) continueWatching
+                    else history.filter { !it.isWatched && it.type != ContentType.LIVE && it.playbackPosition > 3000L }
                 }
 
                 if (showSearchScreen) {
                     GlobalSearchScreen(
                         query = viewModel.searchQuery,
-                        onQueryChange = { viewModel.onSearchQueryChanged(it) },
+                        onQueryChange = { viewModel.onSearchQueryChanged(it, searchScope) },
                         isSearching = viewModel.isSearching,
                         searchChannels = viewModel.searchChannels,
                         searchMovies = viewModel.searchMovies,
@@ -441,6 +335,121 @@ fun FoxStreamApp(
                             viewModel.onSearchQueryChanged("")
                         }
                     )
+                } else {
+                    when (currentTab) {
+                        AppNavTab.HOME -> HomeScreen(
+                            playlists = playlists,
+                            activePlaylistId = activePlaylistId,
+                            history = homeHistory,
+                            favorites = favorites,
+                            channels = channels,
+                            movies = movies,
+                            seriesList = seriesList,
+                            popularMovies = viewModel.popularMovies,
+                            popularSeries = viewModel.popularSeries,
+                            newReleases = viewModel.newReleases,
+                            trendingMovies = viewModel.trendingMovies,
+                            featuredBannerItems = viewModel.featuredBannerItems,
+                            precomputedCategoryCarousels = viewModel.homeCategoryCarousels,
+                            previewMovies = viewModel.homePreviewMovies,
+                            previewSeries = viewModel.homePreviewSeries,
+                            favoriteIdsSet = viewModel.favoriteIdsSet.value,
+                            isLoading = viewModel.isLoading,
+                            onPlay = onPlayStream,
+                            onNavigate = { currentTab = it },
+                            onOpenAdd = { showAddPlaylistDialog = true },
+                            onToggleFavoriteChannel = { viewModel.toggleFavoriteChannel(it) },
+                            onToggleFavoriteMovie = { viewModel.toggleFavoriteMovie(it) },
+                            onOpenSeries = { s ->
+                                selectedSeriesForDetails = s
+                                currentTab = AppNavTab.SERIES
+                            },
+                            onOpenMovie = { movie: MovieItem ->
+                                if (movie.id.startsWith("series_") || movie.id.startsWith("-")) {
+                                    val sId = movie.id.removePrefix("series_").removePrefix("-")
+                                    val s = seriesList.find { it.id == sId }
+                                    if (s != null) {
+                                        selectedSeriesForDetails = s
+                                        currentTab = AppNavTab.SERIES
+                                    }
+                                } else {
+                                    val route = NavDestinations.buildMovieDetailsRoute(movie.id)
+                                    navigateToRoute(route)
+                                }
+                            },
+                            onRemoveHistory = { item ->
+                                viewModel.removeHistoryItem(item)
+                            }
+                        )
+                        AppNavTab.LIVE -> LiveTvScreen(
+                            channels = channels,
+                            favorites = favorites,
+                            onPlay = onPlayStream,
+                            onToggleFavorite = { channel ->
+                                viewModel.toggleFavoriteChannel(channel)
+                            }
+                        )
+                        AppNavTab.MOVIES -> MoviesScreen(
+                            movies = movies,
+                            favorites = favorites,
+                            onPlay = onPlayStream,
+                            onOpenMovie = { movie ->
+                                val route = NavDestinations.buildMovieDetailsRoute(movie.id)
+                                navigateToRoute(route)
+                            },
+                            onToggleFavorite = { movie ->
+                                viewModel.toggleFavoriteMovie(movie)
+                            },
+                            onTriggerSearch = { searchScope = "MOVIE"; showSearchScreen = true }
+                        )
+                        AppNavTab.SERIES -> SeriesScreen(
+                            seriesList = seriesList,
+                            initialSeries = selectedSeriesForDetails,
+                            onClearInitialSeries = { selectedSeriesForDetails = null },
+                            history = history,
+                            onPlayEpisode = { s, ep ->
+                                playMedia(ep.streamUrl, "${s.name} - ${ep.title}", ContentType.SERIES, s, ep)
+                            },
+                            onLoadDetails = { s, callback ->
+                                viewModel.getSeriesDetailsOnDemand(s, callback)
+                            },
+                            onTriggerSearch = { searchScope = "SERIES"; showSearchScreen = true }
+                        )
+                        AppNavTab.FAVORITES -> FavoritesScreen(
+                            favorites = favorites,
+                            onPlayFavorite = { fav ->
+                                if (fav.type == ContentType.MOVIE) {
+                                    val matched = movies.find { it.streamUrl == fav.streamUrl || it.id == fav.contentId }
+                                    if (matched != null) {
+                                        val route = NavDestinations.buildMovieDetailsRoute(matched.id)
+                                        navigateToRoute(route)
+                                    } else {
+                                        fav.streamUrl?.let { onPlayStream(it, fav.title, fav.type) }
+                                    }
+                                } else {
+                                    fav.streamUrl?.let { onPlayStream(it, fav.title, fav.type) }
+                                }
+                            },
+                            onRemove = { favoriteItem ->
+                                viewModel.removeFavorite(favoriteItem)
+                            }
+                        )
+                        AppNavTab.PLAYLISTS -> PlaylistsScreen(
+                            playlists = playlists,
+                            activePlaylistId = activePlaylistId,
+                            onSelect = { viewModel.selectPlaylist(it) },
+                            onOpenAdd = { showAddPlaylistDialog = true },
+                            onDelete = { viewModel.deletePlaylist(it) },
+                            onRename = { id, newName -> viewModel.renamePlaylist(id, newName) },
+                            onUpdatePlaylist = { id -> viewModel.updatePlaylist(id) },
+                            onUpdateAll = { viewModel.updateAllPlaylists() }
+                        )
+                        AppNavTab.SETTINGS -> SettingsScreen(
+                            onClearCache = {
+                                viewModel.clearLocalCache()
+                            }
+                        )
+                    }
                 }
 
                 if (viewModel.isLoading) {

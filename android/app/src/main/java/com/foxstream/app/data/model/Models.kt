@@ -169,3 +169,11 @@ data class TmdbMatchCache(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+data class CategoryCarouselItem(
+    val title: String,
+    val type: ContentType,
+    val movies: List<MovieItem> = emptyList(),
+    val series: List<SeriesItem> = emptyList(),
+    val channels: List<LiveChannel> = emptyList()
+)
+

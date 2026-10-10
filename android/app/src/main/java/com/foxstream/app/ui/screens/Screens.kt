@@ -60,6 +60,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 
+
 // ==========================================
 // IMAGE CACHING AND LOADER COMPOSABLE
 // ==========================================
@@ -78,32 +79,18 @@ fun CoilPosterImage(
             Icon(placeholderIcon, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(24.dp))
         }
     } else {
-        SubcomposeAsyncImage(
-            model = url,
-            contentDescription = null,
-            modifier = modifier,
-            contentScale = contentScale,
-            loading = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF141722)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(placeholderIcon, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.size(20.dp))
-                }
-            },
-            error = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF141722)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(placeholderIcon, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(24.dp))
-                }
-            }
-        )
+        Box(
+            modifier = modifier.background(Color(0xFF141722)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(placeholderIcon, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.size(20.dp))
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale
+            )
+        }
     }
 }
 
@@ -651,6 +638,10 @@ fun HomeScreen(
     newReleases: List<MovieItem> = emptyList(),
     trendingMovies: List<MovieItem> = emptyList(),
     featuredBannerItems: List<HeroBannerItem> = emptyList(),
+    precomputedCategoryCarousels: List<CategoryCarouselItem> = emptyList(),
+    previewMovies: List<MovieItem> = emptyList(),
+    previewSeries: List<SeriesItem> = emptyList(),
+    favoriteIdsSet: Set<String> = emptySet(),
     isLoading: Boolean = false,
     onPlay: (String, String, ContentType) -> Unit,
     onNavigate: (AppNavTab) -> Unit,
@@ -714,33 +705,44 @@ fun HomeScreen(
         return
     }
 
-    // Top populated categories directly from playlist items for up to 12 dedicated category carousels
-    val topPlaylistCategories = remember(movies, seriesList, channels) {
-        val catsWithCounts = mutableMapOf<String, Int>()
+    // Fast O(1) favorite IDs lookup
+    val effectiveFavoriteIds = remember(favorites, favoriteIdsSet) {
+        if (favoriteIdsSet.isNotEmpty()) favoriteIdsSet
+        else favorites.mapNotNull { it.contentId }.toSet()
+    }
 
-        movies.forEach { m ->
-            val c = m.category.trim()
-            if (c.isNotBlank() && !c.equals("Filmes", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
-                catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
+    // Pre-computed map of posters for history items (zero linear scan)
+    val historyPosters = remember(history) {
+        val map = mutableMapOf<String, String>()
+        for (item in history) {
+            if (!item.posterUrl.isNullOrBlank()) {
+                map[item.id] = item.posterUrl
             }
         }
-        seriesList.forEach { s ->
-            val c = s.category.trim()
-            if (c.isNotBlank() && !c.equals("Séries", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
-                catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
-            }
-        }
-        channels.forEach { ch ->
-            val c = ch.category.trim()
-            if (c.isNotBlank() && !c.equals("Canais", ignoreCase = true) && !c.equals("TV ao Vivo", ignoreCase = true) && !c.equals("Geral", ignoreCase = true) && !c.equals("Todos", ignoreCase = true)) {
-                catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
-            }
-        }
+        map
+    }
 
-        catsWithCounts.entries
-            .sortedByDescending { it.value }
-            .map { it.key }
-            .take(12)
+    // Pre-computed category carousels: prioritizes ViewModel pre-computed background result (0ms UI lag)
+    val categoryCarousels = remember(precomputedCategoryCarousels, movies, seriesList, channels) {
+        if (precomputedCategoryCarousels.isNotEmpty()) {
+            precomputedCategoryCarousels
+        } else {
+            val catsWithCounts = mutableMapOf<String, Int>()
+            movies.take(300).forEach { m ->
+                val c = m.category.trim()
+                if (c.isNotBlank() && !c.equals("Filmes", ignoreCase = true) && !c.equals("Geral", ignoreCase = true)) {
+                    catsWithCounts[c] = (catsWithCounts[c] ?: 0) + 1
+                }
+            }
+            val topCats = catsWithCounts.entries.sortedByDescending { it.value }.map { it.key }.take(6)
+            val moviesByCat = movies.groupBy { it.category.trim().lowercase() }
+            topCats.mapNotNull { catName ->
+                val catMovies = moviesByCat[catName.lowercase()]?.take(25) ?: emptyList()
+                if (catMovies.isNotEmpty()) {
+                    CategoryCarouselItem(title = catName, type = ContentType.MOVIE, movies = catMovies)
+                } else null
+            }
+        }
     }
 
     // Dynamic Hero Banner items: prioritizes TMDB matched content from user's active playlist
@@ -816,7 +818,10 @@ fun HomeScreen(
         }
     }
 
+    val homeListState = rememberLazyListState()
+
     LazyColumn(
+        state = homeListState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -871,23 +876,7 @@ fun HomeScreen(
                     ) {
                         items(history, key = { it.id }) { item ->
                             val isSelected = selectedContinueWatchingId == item.id
-                            val seriesPoster = if (item.type == ContentType.SERIES) {
-                                val sName = item.seriesName ?: item.title.substringBefore(" - ").trim()
-                                val matchedByEp = seriesList.find { s -> s.seasons.any { season -> season.episodes.any { ep -> ep.streamUrl == item.streamUrl } } }
-                                val matchedByName = seriesList.find { s ->
-                                    s.name.equals(sName, ignoreCase = true) ||
-                                    item.title.startsWith(s.name, ignoreCase = true) ||
-                                    (sName.length > 2 && s.name.contains(sName, ignoreCase = true))
-                                }
-                                matchedByEp?.posterUrl ?: matchedByName?.posterUrl
-                            } else null
-
-                            val fallbackPoster = when (item.type) {
-                                ContentType.MOVIE -> movies.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.posterUrl
-                                ContentType.SERIES -> seriesPoster
-                                ContentType.LIVE -> channels.find { it.streamUrl == item.streamUrl || it.name.equals(item.title, ignoreCase = true) }?.logoUrl
-                            }
-                            val posterToUse = if (item.type == ContentType.SERIES) (seriesPoster ?: item.posterUrl) else (item.posterUrl ?: fallbackPoster)
+                            val posterToUse = historyPosters[item.id] ?: item.posterUrl
                             val placeholderIcon = when (item.type) {
                                 ContentType.LIVE -> Icons.Default.Tv
                                 ContentType.MOVIE -> Icons.Default.Movie
@@ -1100,8 +1089,9 @@ fun HomeScreen(
                 }
             }
 
-            // 5. Filmes (Lista Principal M3U / Xtream)
-            if (movies.isNotEmpty()) {
+            // 5. Filmes (Lista Principal M3U / Xtream - amostra fluida otimizada para Home)
+            val displayMovies = if (previewMovies.isNotEmpty()) previewMovies else movies.take(30)
+            if (displayMovies.isNotEmpty()) {
                 item {
                     SectionHeaderWithAction(
                         title = "Filmes",
@@ -1110,8 +1100,9 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     MoviesHorizontalCarousel(
-                        movies = movies,
+                        movies = displayMovies,
                         favorites = favorites,
+                        favoriteIds = effectiveFavoriteIds,
                         onPlay = onPlay,
                         onOpenMovie = onOpenMovie,
                         onToggleFavorite = onToggleFavoriteMovie
@@ -1119,8 +1110,9 @@ fun HomeScreen(
                 }
             }
 
-            // 6. Séries (Lista Principal M3U / Xtream)
-            if (seriesList.isNotEmpty()) {
+            // 6. Séries (Lista Principal M3U / Xtream - amostra fluida otimizada para Home)
+            val displaySeries = if (previewSeries.isNotEmpty()) previewSeries else seriesList.take(30)
+            if (displaySeries.isNotEmpty()) {
                 item {
                     SectionHeaderWithAction(
                         title = "Séries",
@@ -1129,7 +1121,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     SeriesHorizontalCarousel(
-                        seriesList = seriesList,
+                        seriesList = displaySeries,
                         onOpenSeries = onOpenSeries
                     )
                 }
@@ -1189,56 +1181,39 @@ fun HomeScreen(
                 }
             }
 
-            // 10. Até 12 Carrosséis Dinâmicos por Categorias Pré-definidas na Lista IPTV
-            topPlaylistCategories.forEach { catName ->
-                val catMovies = movies.filter { it.category.equals(catName, ignoreCase = true) }
-                val catSeries = seriesList.filter { it.category.equals(catName, ignoreCase = true) }
-                val catChannels = channels.filter { it.category.equals(catName, ignoreCase = true) }
-
-                if (catMovies.isNotEmpty()) {
-                    item {
-                        SectionHeaderWithAction(
-                            title = catName,
-                            actionText = "Ver todos",
-                            onAction = { onNavigate(AppNavTab.MOVIES) }
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        MoviesHorizontalCarousel(
-                            movies = catMovies,
-                            favorites = favorites,
-                            onPlay = onPlay,
-                            onOpenMovie = onOpenMovie,
-                            onToggleFavorite = onToggleFavoriteMovie
-                        )
-                    }
-                } else if (catSeries.isNotEmpty()) {
-                    item {
-                        SectionHeaderWithAction(
-                            title = catName,
-                            actionText = "Ver todos",
-                            onAction = { onNavigate(AppNavTab.SERIES) }
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        SeriesHorizontalCarousel(
-                            seriesList = catSeries,
-                            onOpenSeries = onOpenSeries
-                        )
-                    }
-                } else if (catChannels.isNotEmpty()) {
-                    item {
-                        SectionHeaderWithAction(
-                            title = catName,
-                            actionText = "Ver todos",
-                            onAction = { onNavigate(AppNavTab.LIVE) }
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        LiveChannelsHorizontalCarousel(
-                            channels = catChannels,
-                            favorites = favorites,
-                            onPlay = onPlay,
-                            onToggleFavorite = onToggleFavoriteChannel
-                        )
-                    }
+            // 10. Carrosséis Dinâmicos por Categorias (Reciclados de forma fluida e sob demanda)
+            items(categoryCarousels, key = { "home_cat_${it.title}_${it.type}" }) { carousel ->
+                val targetTab = when (carousel.type) {
+                    ContentType.MOVIE -> AppNavTab.MOVIES
+                    ContentType.SERIES -> AppNavTab.SERIES
+                    ContentType.LIVE -> AppNavTab.LIVE
+                }
+                SectionHeaderWithAction(
+                    title = carousel.title,
+                    actionText = "Ver todos",
+                    onAction = { onNavigate(targetTab) }
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                when (carousel.type) {
+                    ContentType.MOVIE -> MoviesHorizontalCarousel(
+                        movies = carousel.movies,
+                        favorites = favorites,
+                        favoriteIds = effectiveFavoriteIds,
+                        onPlay = onPlay,
+                        onOpenMovie = onOpenMovie,
+                        onToggleFavorite = onToggleFavoriteMovie
+                    )
+                    ContentType.SERIES -> SeriesHorizontalCarousel(
+                        seriesList = carousel.series,
+                        onOpenSeries = onOpenSeries
+                    )
+                    ContentType.LIVE -> LiveChannelsHorizontalCarousel(
+                        channels = carousel.channels,
+                        favorites = favorites,
+                        favoriteIds = effectiveFavoriteIds,
+                        onPlay = onPlay,
+                        onToggleFavorite = onToggleFavoriteChannel
+                    )
                 }
             }
     }
@@ -1250,7 +1225,8 @@ fun LiveChannelsHorizontalCarousel(
     favorites: List<FavoriteItem>,
     onPlay: (String, String, ContentType) -> Unit,
     onLoadMore: (() -> Unit)? = null,
-    onToggleFavorite: (LiveChannel) -> Unit
+    onToggleFavorite: (LiveChannel) -> Unit,
+    favoriteIds: Set<String> = emptySet()
 ) {
     val listState = rememberLazyListState()
 
@@ -1275,7 +1251,7 @@ fun LiveChannelsHorizontalCarousel(
         modifier = Modifier.fillMaxWidth()
     ) {
         items(channels, key = { it.id }) { channel ->
-            val isFav = channel.isFavorite || favorites.any { it.contentId == channel.id }
+            val isFav = channel.isFavorite || (if (favoriteIds.isNotEmpty()) favoriteIds.contains(channel.id) else favorites.any { it.contentId == channel.id })
             Box(modifier = Modifier.width(175.dp)) {
                 LiveChannelGridCard(
                     channel = channel,
@@ -1295,7 +1271,8 @@ fun MoviesHorizontalCarousel(
     onPlay: (String, String, ContentType) -> Unit,
     onOpenMovie: (MovieItem) -> Unit,
     onLoadMore: (() -> Unit)? = null,
-    onToggleFavorite: (MovieItem) -> Unit
+    onToggleFavorite: (MovieItem) -> Unit,
+    favoriteIds: Set<String> = emptySet()
 ) {
     val listState = rememberLazyListState()
 
@@ -1320,7 +1297,7 @@ fun MoviesHorizontalCarousel(
         modifier = Modifier.fillMaxWidth()
     ) {
         items(movies, key = { it.id }) { movie ->
-            val isFav = movie.isFavorite || favorites.any { it.contentId == movie.id }
+            val isFav = movie.isFavorite || (if (favoriteIds.isNotEmpty()) favoriteIds.contains(movie.id) else favorites.any { it.contentId == movie.id })
             Box(modifier = Modifier.width(135.dp)) {
                 MovieGridCard(
                     movie = movie,
@@ -3947,7 +3924,7 @@ fun GlobalSearchScreen(
                     item {
                         Text("TV ao Vivo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
-                    items(searchChannels) { ch ->
+                    items(searchChannels, key = { "srch_ch_${it.id}" }) { ch ->
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -3975,7 +3952,7 @@ fun GlobalSearchScreen(
                     item {
                         Text("Filmes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
-                    items(searchMovies) { m ->
+                    items(searchMovies, key = { "srch_m_${it.id}" }) { m ->
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -4005,7 +3982,7 @@ fun GlobalSearchScreen(
                     item {
                         Text("Séries", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
-                    items(searchSeries) { s ->
+                    items(searchSeries, key = { "srch_s_${it.id}" }) { s ->
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -4038,7 +4015,7 @@ fun GlobalSearchScreen(
                     item {
                         Text("Episódios", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
-                    items(searchEpisodes) { (series, ep) ->
+                    items(searchEpisodes, key = { "srch_ep_${it.first.id}_${it.second.id}" }) { (series, ep) ->
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
