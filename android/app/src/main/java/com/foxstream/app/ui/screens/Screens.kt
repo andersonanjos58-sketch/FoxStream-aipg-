@@ -1686,9 +1686,7 @@ fun LiveTvScreen(
                                         }
                                         Button(
                                             onClick = {
-                                                activeChannel?.let { ch ->
-                                                    onPlay(ch.streamUrl, ch.name, ContentType.LIVE)
-                                                }
+                                                isFullScreen = !isFullScreen
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2E40)),
                                             shape = RoundedCornerShape(8.dp),
@@ -2293,8 +2291,12 @@ fun LiveTvScreen(
                         isSelected = isCurrent,
                         onPlay = onPlay,
                         onSelect = { selectedCh ->
-                            activeChannel = selectedCh
-                            prefs.edit().putString("last_live_channel_id", selectedCh.id).apply()
+                            if (activeChannel?.id == selectedCh.id) {
+                                isFullScreen = true
+                            } else {
+                                activeChannel = selectedCh
+                                prefs.edit().putString("last_live_channel_id", selectedCh.id).apply()
+                            }
                         },
                         onToggleFavorite = onToggleFavorite
                     )
@@ -5376,5 +5378,6 @@ fun LivePlayerAnimatedVisibility(
     ) {
         content()
     }
+}
 }
 
