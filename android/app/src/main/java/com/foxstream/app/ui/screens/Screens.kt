@@ -2303,6 +2303,7 @@ fun LiveTvScreen(
         }
     }
 }
+}
 
 private fun generateEpgPrograms(channel: LiveChannel): List<EpgProgram> {
     val now = java.util.Calendar.getInstance()
