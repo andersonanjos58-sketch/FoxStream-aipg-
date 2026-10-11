@@ -5371,8 +5371,9 @@ fun LivePlayerAnimatedVisibility(
         visible = visible,
         enter = enter,
         exit = exit,
-        modifier = modifier,
-        content = content
-    )
+        modifier = modifier
+    ) {
+        content()
+    }
 }
 
