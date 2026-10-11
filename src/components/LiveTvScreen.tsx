@@ -268,18 +268,50 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
         });
     }
 
-    // Record history
-    if (onRecordHistory) {
-      onRecordHistory(activeChannel);
-    }
-
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [activeChannel, retryKey, fixXtreamStreamUrl, getPlayableUrl, onRecordHistory]);
+  }, [activeChannel, retryKey, fixXtreamStreamUrl, getPlayableUrl]);
+
+  // 3-second minimum watch rule: only add to Continue Watching if watched for >= 3 seconds
+  const watchTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordedChannelIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isPlaying || !activeChannel) {
+      if (watchTimerRef.current) {
+        clearTimeout(watchTimerRef.current);
+        watchTimerRef.current = null;
+      }
+      return;
+    }
+
+    // Don't re-record if already recorded for this specific channel in this continuous playback
+    if (recordedChannelIdRef.current === activeChannel.id) {
+      return;
+    }
+
+    if (watchTimerRef.current) {
+      clearTimeout(watchTimerRef.current);
+    }
+
+    watchTimerRef.current = setTimeout(() => {
+      if (onRecordHistory && activeChannel) {
+        onRecordHistory(activeChannel);
+        recordedChannelIdRef.current = activeChannel.id;
+      }
+    }, 3000);
+
+    return () => {
+      if (watchTimerRef.current) {
+        clearTimeout(watchTimerRef.current);
+        watchTimerRef.current = null;
+      }
+    };
+  }, [isPlaying, activeChannel, onRecordHistory]);
 
   // Playback Control Handlers
   const togglePlay = () => {

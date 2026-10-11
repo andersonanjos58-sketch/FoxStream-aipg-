@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { 
-  Play, Tv, Film, Clapperboard, Heart, Clock, ChevronRight, 
+  Play, Tv, Film, Clapperboard, Heart, ChevronRight, 
   ChevronLeft, Plus, Sparkles, Trash2,
   TrendingUp, Rocket
 } from 'lucide-react';
@@ -212,19 +212,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
 
-  // Synchronize history state with prop and StorageService
+  // Synchronize history state with prop and StorageService (filtering out completed items >= 95%)
   const [localHistory, setLocalHistory] = useState<HistoryItem[]>(() => {
-    if (history && history.length > 0) return history;
-    return StorageService.getHistory();
+    const raw = history && history.length > 0 ? history : StorageService.getHistory();
+    return raw.filter(h => h && h.id && h.title && (h.type === 'live' || !h.progress || h.progress < 95));
   });
 
   useEffect(() => {
-    if (history && history.length > 0) {
-      setLocalHistory(history);
-    } else {
-      setLocalHistory(StorageService.getHistory());
-    }
+    const raw = history !== undefined ? history : StorageService.getHistory();
+    setLocalHistory(raw.filter(h => h && h.id && h.title && (h.type === 'live' || !h.progress || h.progress < 95)));
   }, [history]);
+
+  const validHistory = useMemo(() => {
+    return localHistory.filter(item => {
+      if (!item || !item.id || !item.title) return false;
+      if (item.type !== 'live' && typeof item.progress === 'number' && item.progress >= 95) {
+        return false;
+      }
+      return true;
+    });
+  }, [localHistory]);
 
   // Format played timestamp into human-readable relative Portuguese text
   const formatPlayedAt = (isoString?: string): string => {
@@ -761,19 +768,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {/* MAIN HOMESCREEN SECTIONS */}
       {selectedCategory === 'Todos' && (
         <>
-          {/* SECTION 1: CONTINUE ASSISTINDO (History) - Visible only when there are items */}
-          {localHistory.length > 0 && (
+          {/* SECTION 1: CONTINUE ASSISTINDO (History) - Visible ONLY when there are items */}
+          {validHistory.length > 0 && (
             <section className="px-4 max-w-7xl mx-auto space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
-                <Clock className="w-3.5 h-3.5 stroke-[2.2]" />
+                <Play className="w-3.5 h-3.5 fill-orange-400 text-orange-400 ml-0.5" />
               </div>
               <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
                 Continue Assistindo
               </h2>
               <span className="text-[10px] font-semibold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full border border-orange-500/20">
-                {localHistory.length} {localHistory.length === 1 ? 'item' : 'itens'}
+                {validHistory.length} {validHistory.length === 1 ? 'item' : 'itens'}
               </span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -800,7 +807,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             ref={historyRef}
             className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
           >
-            {localHistory.slice(0, 20).map((item) => {
+            {validHistory.slice(0, 20).map((item) => {
               const seriesMatch = item.type === 'series'
                 ? series.find(s => 
                     s.name.toLowerCase() === (item.seriesName || item.title.split(' - ')[0]).trim().toLowerCase() ||
@@ -868,8 +875,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         </p>
                       )}
 
+                      {/* Progress bar for movies and series */}
+                      {item.type !== 'live' && typeof item.progress === 'number' && item.progress > 0 && (
+                        <div className="w-full bg-neutral-800 rounded-full h-1 mt-1.5 overflow-hidden">
+                          <div 
+                            className="bg-orange-500 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${Math.min(100, Math.max(5, item.progress))}%` }}
+                          />
+                        </div>
+                      )}
+
                       <p className="text-[10px] text-neutral-500 truncate mt-1">
-                        {formatPlayedAt(item.playedAt)}
+                        {item.type !== 'live' && typeof item.progress === 'number' && item.progress > 0 
+                          ? `${item.progress}% concluído • ${formatPlayedAt(item.playedAt)}`
+                          : formatPlayedAt(item.playedAt)
+                        }
                       </p>
                     </div>
                   </div>

@@ -395,7 +395,18 @@ export class StorageService {
       }
       if (!data) return [];
       const parsed = JSON.parse(data);
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      
+      // Filter out corrupted/empty items and any movie/series with progress >= 95%
+      return parsed.filter((item: HistoryItem) => {
+        if (!item || typeof item !== 'object' || !item.id || !item.title) return false;
+        if (!item.streamUrl && !item.contentId) return false;
+        // 95% or higher is considered fully watched and excluded
+        if (item.type !== 'live' && typeof item.progress === 'number' && item.progress >= 95) {
+          return false;
+        }
+        return true;
+      });
     } catch {
       return [];
     }
@@ -403,14 +414,21 @@ export class StorageService {
 
   public static addToHistory(item: Omit<HistoryItem, 'id' | 'playedAt'>): void {
     try {
+      // If 95% or more completed, don't add to continue watching, remove if exists
+      if (item.type !== 'live' && typeof item.progress === 'number' && item.progress >= 95) {
+        this.removeHistoryByContentOrStream(item.contentId, item.streamUrl);
+        return;
+      }
+
       let history = this.getHistory();
-      // Remove if already exists to push to top
-      history = history.filter(h => h && h.contentId !== item.contentId);
+      // Remove previous entry matching contentId or streamUrl to put latest at top
+      history = history.filter(h => h && h.contentId !== item.contentId && h.streamUrl !== item.streamUrl);
 
       const newItem: HistoryItem = {
         ...item,
         id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        playedAt: new Date().toISOString()
+        playedAt: new Date().toISOString(),
+        timestamp: Date.now()
       };
 
       history.unshift(newItem);
@@ -421,6 +439,82 @@ export class StorageService {
       safeStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
     } catch (err) {
       console.warn('Failed to add to history:', err);
+    }
+  }
+
+  public static removeHistoryByContentOrStream(contentId?: string, streamUrl?: string): void {
+    try {
+      let history = this.getHistory();
+      history = history.filter(h => {
+        if (contentId && h.contentId === contentId) return false;
+        if (streamUrl && h.streamUrl === streamUrl) return false;
+        return true;
+      });
+      safeStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+    } catch (err) {
+      console.warn('Failed to remove history item by content/stream:', err);
+    }
+  }
+
+  public static updatePlaybackProgress(
+    contentId: string,
+    streamUrl: string,
+    currentTime: number,
+    duration: number,
+    metadata?: Partial<HistoryItem>
+  ): { removed: boolean; history: HistoryItem[] } {
+    try {
+      const isCompleted = duration > 0 && (currentTime / duration >= 0.95);
+
+      if (isCompleted) {
+        this.removeHistoryByContentOrStream(contentId, streamUrl);
+        return { removed: true, history: this.getHistory() };
+      }
+
+      let history = this.getHistory();
+      const progress = duration > 0 ? Math.min(100, Math.round((currentTime / duration) * 100)) : undefined;
+      const existingIdx = history.findIndex(h => h.contentId === contentId || (streamUrl && h.streamUrl === streamUrl));
+
+      if (existingIdx >= 0) {
+        history[existingIdx] = {
+          ...history[existingIdx],
+          ...metadata,
+          currentTime,
+          duration,
+          progress,
+          playedAt: new Date().toISOString(),
+          timestamp: Date.now()
+        };
+        const updated = history.splice(existingIdx, 1)[0];
+        history.unshift(updated);
+      } else if (metadata && metadata.title) {
+        const newItem: HistoryItem = {
+          id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          contentId,
+          streamUrl,
+          title: metadata.title,
+          type: metadata.type || 'movie',
+          posterUrl: metadata.posterUrl,
+          category: metadata.category,
+          seriesName: metadata.seriesName,
+          seasonEpisode: metadata.seasonEpisode,
+          currentTime,
+          duration,
+          progress,
+          playedAt: new Date().toISOString(),
+          timestamp: Date.now()
+        };
+        history.unshift(newItem);
+      }
+
+      if (history.length > 50) {
+        history = history.slice(0, 50);
+      }
+      safeStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+      return { removed: false, history };
+    } catch (err) {
+      console.warn('Failed to update playback progress:', err);
+      return { removed: false, history: this.getHistory() };
     }
   }
 

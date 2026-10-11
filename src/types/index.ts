@@ -113,6 +113,9 @@ export interface HistoryItem {
   seasonEpisode?: string;
   playedAt: string;
   timestamp?: number;
+  currentTime?: number;
+  duration?: number;
+  progress?: number;
 }
 
 export interface FavoriteItem {

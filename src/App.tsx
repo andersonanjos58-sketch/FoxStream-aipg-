@@ -76,6 +76,7 @@ export default function App() {
   // Playback Dialog
   const [playbackDialog, setPlaybackDialog] = useState<{
     isOpen: boolean;
+    contentId?: string;
     title: string;
     streamUrl: string;
     posterUrl?: string;
@@ -83,6 +84,7 @@ export default function App() {
     type: ContentType;
     seriesName?: string;
     seasonEpisode?: string;
+    initialTime?: number;
   }>({
     isOpen: false,
     title: '',
@@ -187,23 +189,10 @@ export default function App() {
   const handlePlayChannel = (channel: LiveChannel) => {
     const healedUrl = fixXtreamStreamUrl(channel.streamUrl);
 
-    // Record history
-    const historyItem: HistoryItem = {
-      id: `hist_${Date.now()}`,
-      contentId: channel.id,
-      title: channel.name,
-      type: 'live',
-      posterUrl: channel.logoUrl,
-      playedAt: new Date().toISOString(),
-      timestamp: Date.now(),
-      streamUrl: healedUrl
-    };
-    StorageService.addToHistory(historyItem);
-    setHistory(StorageService.getHistory());
-
-    // Also open the Playback Dialog with VLC intents & options
+    // Open Playback Dialog - History is recorded once watched for 3s in InternalPlayer
     setPlaybackDialog({
       isOpen: true,
+      contentId: channel.id,
       title: channel.name,
       streamUrl: healedUrl,
       posterUrl: channel.logoUrl,
@@ -212,16 +201,14 @@ export default function App() {
     });
   };
 
-  // Record history for in-page Live TV channel playback without opening modal
+  // Record history for in-page Live TV channel playback after 3 seconds of watching
   const handleRecordLiveChannelHistory = useCallback((channel: LiveChannel) => {
     const healedUrl = fixXtreamStreamUrl(channel.streamUrl);
-    const historyItem: HistoryItem = {
-      id: `hist_${Date.now()}`,
+    const historyItem: Omit<HistoryItem, 'id' | 'playedAt'> = {
       contentId: channel.id,
       title: channel.name,
       type: 'live',
       posterUrl: channel.logoUrl,
-      playedAt: new Date().toISOString(),
       timestamp: Date.now(),
       streamUrl: healedUrl
     };
@@ -268,21 +255,10 @@ export default function App() {
 
     const healedUrl = fixXtreamStreamUrl(streamUrl);
 
-    const historyItem: HistoryItem = {
-      id: `hist_${Date.now()}`,
-      contentId: finalMovie.id,
-      title: finalMovie.name,
-      type: 'movie',
-      posterUrl: finalMovie.posterUrl,
-      playedAt: new Date().toISOString(),
-      timestamp: Date.now(),
-      streamUrl: healedUrl
-    };
-    StorageService.addToHistory(historyItem);
-    setHistory(StorageService.getHistory());
-
+    // Open Playback Dialog - History is recorded once watched for 3s in InternalPlayer
     setPlaybackDialog({
       isOpen: true,
+      contentId: finalMovie.id,
       title: finalMovie.name,
       streamUrl: healedUrl,
       posterUrl: finalMovie.posterUrl,
@@ -296,24 +272,11 @@ export default function App() {
     setSelectedSeries(null); // close modal
     const healedUrl = fixXtreamStreamUrl(episode.streamUrl);
 
-    const historyItem: HistoryItem = {
-      id: `hist_${Date.now()}`,
-      contentId: episode.id,
-      title: `${seriesItem.name} - ${episode.title}`,
-      type: 'series',
-      posterUrl: seriesItem.posterUrl,
-      playedAt: new Date().toISOString(),
-      timestamp: Date.now(),
-      seriesName: seriesItem.name,
-      seasonEpisode: `T${episode.seasonNum}:E${episode.episodeNum}`,
-      streamUrl: healedUrl
-    };
-    StorageService.addToHistory(historyItem);
-    setHistory(StorageService.getHistory());
-
+    // Open Playback Dialog - History is recorded once watched for 3s in InternalPlayer
     setPlaybackDialog({
       isOpen: true,
-      title: `${seriesItem.name} • T${episode.seasonNum}:E${episode.episodeNum} - ${episode.title}`,
+      contentId: episode.id,
+      title: `${seriesItem.name} - ${episode.title}`,
       streamUrl: healedUrl,
       posterUrl: seriesItem.posterUrl,
       category: seriesItem.category,
@@ -345,30 +308,16 @@ export default function App() {
     if (item.streamUrl) {
       const healedUrl = fixXtreamStreamUrl(item.streamUrl);
 
-      // Refresh item in history so it stays at the top of Continue Watching
-      const updatedHistoryItem: HistoryItem = {
-        id: `hist_${Date.now()}`,
-        contentId: item.contentId,
-        title: item.title,
-        type: item.type,
-        posterUrl: item.posterUrl,
-        playedAt: new Date().toISOString(),
-        timestamp: Date.now(),
-        seriesName: item.seriesName,
-        seasonEpisode: item.seasonEpisode,
-        streamUrl: healedUrl
-      };
-      StorageService.addToHistory(updatedHistoryItem);
-      setHistory(StorageService.getHistory());
-
       setPlaybackDialog({
         isOpen: true,
+        contentId: item.contentId,
         title: item.title,
         streamUrl: healedUrl,
         posterUrl: item.posterUrl,
         type: item.type === 'other' ? 'live' : item.type,
         seriesName: item.seriesName,
-        seasonEpisode: item.seasonEpisode
+        seasonEpisode: item.seasonEpisode,
+        initialTime: item.currentTime || 0
       });
     }
   };
@@ -742,15 +691,26 @@ export default function App() {
       {playbackDialog.isOpen && (
         <InternalPlayer
           options={{
+            contentId: playbackDialog.contentId,
             title: playbackDialog.title,
             streamUrl: playbackDialog.streamUrl,
             posterUrl: playbackDialog.posterUrl,
             category: playbackDialog.category,
             type: playbackDialog.type === 'other' ? 'live' : playbackDialog.type,
             seriesName: playbackDialog.seriesName,
-            seasonEpisode: playbackDialog.seasonEpisode
+            seasonEpisode: playbackDialog.seasonEpisode,
+            initialTime: playbackDialog.initialTime
           }}
           onClose={() => setPlaybackDialog(prev => ({ ...prev, isOpen: false }))}
+          onRecordHistory={() => {
+            setHistory(StorageService.getHistory());
+          }}
+          onUpdateProgress={() => {
+            setHistory(StorageService.getHistory());
+          }}
+          onMediaCompleted={() => {
+            setHistory(StorageService.getHistory());
+          }}
         />
       )}
 

@@ -1,4 +1,5 @@
 export interface PlaybackIntentOptions {
+  contentId?: string;
   title: string;
   streamUrl: string;
   category?: string;
@@ -6,6 +7,7 @@ export interface PlaybackIntentOptions {
   type: 'live' | 'movie' | 'series';
   seriesName?: string;
   seasonEpisode?: string;
+  initialTime?: number;
 }
 
 export interface PlaybackResult {

@@ -2,16 +2,33 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, Maximize2, Minimize2, ExternalLink, RefreshCw, X, AlertTriangle, Tv } from 'lucide-react';
 import Hls from 'hls.js';
 import { PlaybackIntentOptions, PlaybackService } from '../services/playbackService';
+import { StorageService } from '../services/storageService';
+import { HistoryItem } from '../types';
 
 interface InternalPlayerProps {
   options: PlaybackIntentOptions | null;
   onClose: () => void;
+  onRecordHistory?: (item: Omit<HistoryItem, 'id' | 'playedAt'>) => void;
+  onUpdateProgress?: (contentId: string, streamUrl: string, currentTime: number, duration: number, metadata?: Partial<HistoryItem>) => void;
+  onMediaCompleted?: (contentId: string, streamUrl: string) => void;
 }
 
-export const InternalPlayer: React.FC<InternalPlayerProps> = ({ options, onClose }) => {
+export const InternalPlayer: React.FC<InternalPlayerProps> = ({ 
+  options, 
+  onClose,
+  onRecordHistory,
+  onUpdateProgress,
+  onMediaCompleted
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+
+  // Playback tracking refs (3-second threshold & 95% completion)
+  const hasAddedToHistoryRef = useRef(false);
+  const hasCompletedRef = useRef(false);
+  const lastProgressSaveRef = useRef(0);
+  const initialSeekDoneRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -212,11 +229,145 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({ options, onClose
     };
   }, [playableUrl, retryCount]);
 
+  // 3-second watch timer effect (fallback if timeupdate is slow)
+  useEffect(() => {
+    if (!isPlaying || hasAddedToHistoryRef.current || hasCompletedRef.current || !finalStreamUrl) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (!hasAddedToHistoryRef.current && !hasCompletedRef.current) {
+        hasAddedToHistoryRef.current = true;
+        const video = videoRef.current;
+        const curTime = video ? video.currentTime : 0;
+        const dur = video && isFinite(video.duration) ? video.duration : 0;
+        const prog = dur > 0 ? Math.round((curTime / dur) * 100) : undefined;
+
+        const historyData: Omit<HistoryItem, 'id' | 'playedAt'> = {
+          contentId: options?.contentId || finalStreamUrl,
+          title: finalTitle,
+          type: finalType,
+          streamUrl: finalStreamUrl,
+          posterUrl: finalPoster,
+          category: finalCategory,
+          seriesName: finalSeriesName,
+          seasonEpisode: finalSeasonEp,
+          currentTime: curTime,
+          duration: dur,
+          progress: prog,
+          timestamp: Date.now()
+        };
+
+        StorageService.addToHistory(historyData);
+        onRecordHistory?.(historyData);
+      }
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [isPlaying, finalStreamUrl, finalTitle, finalType, finalPoster, finalCategory, finalSeriesName, finalSeasonEp, options?.contentId, onRecordHistory]);
+
   // Video Event Handlers
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
+    const video = videoRef.current;
+    if (!video) return;
+
+    const cur = video.currentTime;
+    setCurrentTime(cur);
+
+    // Rule: Add to Continue Watching after at least 3 seconds watched
+    if (cur >= 3 && !hasAddedToHistoryRef.current && !hasCompletedRef.current) {
+      hasAddedToHistoryRef.current = true;
+      const dur = isFinite(video.duration) ? video.duration : 0;
+      const prog = dur > 0 ? Math.round((cur / dur) * 100) : undefined;
+
+      const historyData: Omit<HistoryItem, 'id' | 'playedAt'> = {
+        contentId: options?.contentId || finalStreamUrl,
+        title: finalTitle,
+        type: finalType,
+        streamUrl: finalStreamUrl,
+        posterUrl: finalPoster,
+        category: finalCategory,
+        seriesName: finalSeriesName,
+        seasonEpisode: finalSeasonEp,
+        currentTime: cur,
+        duration: dur,
+        progress: prog,
+        timestamp: Date.now()
+      };
+
+      StorageService.addToHistory(historyData);
+      onRecordHistory?.(historyData);
     }
+
+    // Rule: At 95% or reaching end credits, mark as watched and remove from Continue Watching
+    if (finalType !== 'live' && isFinite(video.duration) && video.duration > 0) {
+      const percentage = cur / video.duration;
+      if (percentage >= 0.95 && !hasCompletedRef.current) {
+        hasCompletedRef.current = true;
+        const contentId = options?.contentId || finalStreamUrl;
+        StorageService.removeHistoryByContentOrStream(contentId, finalStreamUrl);
+        onMediaCompleted?.(contentId, finalStreamUrl);
+        return;
+      }
+
+      // Throttled progress update (every 4 seconds) if between 3s and 95%
+      const now = Date.now();
+      if (hasAddedToHistoryRef.current && !hasCompletedRef.current && now - lastProgressSaveRef.current > 4000) {
+        lastProgressSaveRef.current = now;
+        const contentId = options?.contentId || finalStreamUrl;
+        StorageService.updatePlaybackProgress(contentId, finalStreamUrl, cur, video.duration, {
+          title: finalTitle,
+          type: finalType,
+          posterUrl: finalPoster,
+          category: finalCategory,
+          seriesName: finalSeriesName,
+          seasonEpisode: finalSeasonEp
+        });
+        onUpdateProgress?.(contentId, finalStreamUrl, cur, video.duration, {
+          title: finalTitle,
+          type: finalType,
+          posterUrl: finalPoster,
+          category: finalCategory,
+          seriesName: finalSeriesName,
+          seasonEpisode: finalSeasonEp
+        });
+      }
+    }
+  };
+
+  const handleEnded = () => {
+    if (finalType !== 'live' && !hasCompletedRef.current) {
+      hasCompletedRef.current = true;
+      const contentId = options?.contentId || finalStreamUrl;
+      StorageService.removeHistoryByContentOrStream(contentId, finalStreamUrl);
+      onMediaCompleted?.(contentId, finalStreamUrl);
+    }
+  };
+
+  const handleSafeClose = () => {
+    const video = videoRef.current;
+    if (video && finalType !== 'live' && hasAddedToHistoryRef.current && !hasCompletedRef.current) {
+      const cur = video.currentTime;
+      const dur = isFinite(video.duration) ? video.duration : 0;
+      if (dur > 0 && cur / dur >= 0.95) {
+        hasCompletedRef.current = true;
+        const contentId = options?.contentId || finalStreamUrl;
+        StorageService.removeHistoryByContentOrStream(contentId, finalStreamUrl);
+        onMediaCompleted?.(contentId, finalStreamUrl);
+      } else if (dur > 0 && cur > 0) {
+        const contentId = options?.contentId || finalStreamUrl;
+        StorageService.updatePlaybackProgress(contentId, finalStreamUrl, cur, dur, {
+          title: finalTitle,
+          type: finalType,
+          posterUrl: finalPoster,
+          category: finalCategory,
+          seriesName: finalSeriesName,
+          seasonEpisode: finalSeasonEp
+        });
+        onUpdateProgress?.(contentId, finalStreamUrl, cur, dur);
+      }
+    }
+    onClose();
   };
 
   const handleDurationChange = () => {
@@ -237,6 +388,15 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({ options, onClose
   };
   const handleLoadedMetadata = () => {
     setIsMetadataLoaded(true);
+    const video = videoRef.current;
+    if (video && !initialSeekDoneRef.current && options?.initialTime && options.initialTime > 5) {
+      try {
+        video.currentTime = options.initialTime;
+        initialSeekDoneRef.current = true;
+      } catch (e) {
+        console.warn('Initial seek failed:', e);
+      }
+    }
   };
   const handleVideoError = () => {
     // If HLS failed natively or basic mp4 stream errored
@@ -393,11 +553,11 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({ options, onClose
           onCanPlay={handleCanPlay}
           onLoadedMetadata={handleLoadedMetadata}
           onError={handleVideoError}
+          onEnded={handleEnded}
           playsInline
           className="w-full h-full object-contain cursor-pointer bg-black"
         />
 
-        {/* LOADING SPINNER OVERLAY */}
         {/* LOADING SPINNER OVERLAY */}
         {isLoading && !error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/45 backdrop-blur-sm pointer-events-none z-15">
@@ -412,7 +572,7 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({ options, onClose
             {/* Top Close Button for Error Overlay */}
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleSafeClose}
               className="absolute top-4 right-4 p-2 rounded-full bg-neutral-900/60 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 transition-colors z-30"
               title="Fechar player"
             >
@@ -442,7 +602,7 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({ options, onClose
               </button>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleSafeClose}
                 className="flex items-center gap-1.5 px-4 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-all active:scale-95"
               >
                 <X className="w-3.5 h-3.5" />
@@ -491,7 +651,7 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({ options, onClose
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleSafeClose}
                 className="p-1.5 rounded-full bg-neutral-900/60 hover:bg-neutral-800/90 text-neutral-400 hover:text-white border border-neutral-800/30 transition-colors"
               >
                 <X className="w-3.5 h-3.5" />
