@@ -177,3 +177,16 @@ data class CategoryCarouselItem(
     val channels: List<LiveChannel> = emptyList()
 )
 
+data class EpgProgram(
+    val id: String,
+    val channelId: String,
+    val title: String,
+    val startTime: String,
+    val endTime: String,
+    val description: String,
+    val category: String,
+    val isLive: Boolean = false,
+    val progressPercent: Float = 0f
+)
+
+

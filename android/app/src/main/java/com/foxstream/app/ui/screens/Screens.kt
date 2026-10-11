@@ -1363,31 +1363,48 @@ fun LiveTvScreen(
     var searchQuery by remember { mutableStateOf("") }
     var debouncedSearchQuery by remember { mutableStateOf("") }
     var filtered by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
+    var sortAlphabetically by remember { mutableStateOf(false) }
+    var isEpgView by remember { mutableStateOf(false) }
 
-    // Debounce the search input by 300ms to avoid constant filtering during active typing
+    // Debounce the search input by 300ms
     LaunchedEffect(searchQuery) {
         delay(300)
         debouncedSearchQuery = searchQuery
     }
 
-    val categories = remember(channels) {
-        listOf("Todos") + channels.map { it.category.trim() }
+    val favoriteIds = remember(favorites) { favorites.map { it.contentId }.toSet() }
+
+    val categories = remember(channels, favorites) {
+        val baseCategories = channels.map { it.category.trim() }
             .filter { it.isNotBlank() }
             .distinct()
             .sorted()
+        val hasFavs = channels.any { it.isFavorite || favoriteIds.contains(it.id) }
+        val list = mutableListOf("Todos")
+        if (hasFavs) {
+            list.add("❤️ Favoritos")
+        }
+        list.addAll(baseCategories)
+        list
     }
     var selectedCategory by remember { mutableStateOf("Todos") }
 
-    // Perform the filtering on Dispatchers.Default (Background Thread) to never lock UI
-    LaunchedEffect(debouncedSearchQuery, selectedCategory, channels) {
+    // Perform filtering on Dispatchers.Default
+    LaunchedEffect(debouncedSearchQuery, selectedCategory, channels, favorites, sortAlphabetically) {
         val result = withContext(Dispatchers.Default) {
-            var list = if (selectedCategory == "Todos") channels
-                       else channels.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+            var list = when {
+                selectedCategory == "Todos" -> channels
+                selectedCategory == "❤️ Favoritos" -> channels.filter { it.isFavorite || favoriteIds.contains(it.id) }
+                else -> channels.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+            }
             val tokens = SearchUtils.extractTokens(debouncedSearchQuery)
             if (tokens.isNotEmpty()) {
                 list = list.filter {
                     SearchUtils.matchesAnyField(tokens, it.name, it.category)
                 }
+            }
+            if (sortAlphabetically) {
+                list = list.sortedBy { it.name }
             }
             list
         }
@@ -1397,50 +1414,189 @@ fun LiveTvScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar canal...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
-                    }
-                }
-            },
+        // Search bar & Sort toggle row
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = OrangePrimary,
-                unfocusedBorderColor = Color(0xFF2D3245),
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Buscar canal ao vivo...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                        }
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = OrangePrimary,
+                    unfocusedBorderColor = Color(0xFF2D3245),
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                )
             )
-        )
+
+            // Sort button
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (sortAlphabetically) OrangePrimary else Color(0xFF1C2030),
+                border = BorderStroke(1.dp, if (sortAlphabetically) OrangePrimary else Color(0xFF2D3245)),
+                modifier = Modifier
+                    .height(52.dp)
+                    .clickable { sortAlphabetically = !sortAlphabetically }
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (sortAlphabetically) "A-Z" else "Ordem",
+                        color = if (sortAlphabetically) Color.White else Color(0xFFB0B5C6),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
 
         CategoryFilterRow(
             categories = categories,
             selectedCategory = selectedCategory,
             onSelectCategory = { selectedCategory = it },
-            modifier = Modifier.padding(vertical = 4.dp)
+            modifier = Modifier.padding(vertical = 2.dp)
         )
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // View Mode Switcher (Grid vs EPG Guide)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (!isEpgView) OrangePrimary else Color(0xFF1C2030),
+                border = BorderStroke(1.dp, if (!isEpgView) OrangePrimary else Color(0xFF2D3245)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .clickable { isEpgView = false }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.GridView,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (!isEpgView) Color.White else Color(0xFF94A3B8)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Grade de Canais",
+                        color = if (!isEpgView) Color.White else Color(0xFF94A3B8),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (isEpgView) OrangePrimary else Color(0xFF1C2030),
+                border = BorderStroke(1.dp, if (isEpgView) OrangePrimary else Color(0xFF2D3245)),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .clickable { isEpgView = true }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (isEpgView) Color.White else Color(0xFF94A3B8)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Guia EPG",
+                        color = if (isEpgView) Color.White else Color(0xFF94A3B8),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // Channel count info header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${filtered.size} ${if (filtered.size == 1) "canal encontrado" else "canais disponíveis"}",
+                color = Color(0xFF94A3B8),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            )
+            if (selectedCategory != "Todos" || searchQuery.isNotBlank()) {
+                Text(
+                    text = "Limpar filtros",
+                    color = OrangePrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        selectedCategory = "Todos"
+                        searchQuery = ""
+                    }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
 
         if (filtered.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = if (searchQuery.isNotBlank() || selectedCategory != "Todos") "Nenhum canal encontrado." else "Nenhum canal disponível.",
-                    color = Color.Gray
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.LiveTv,
+                        contentDescription = null,
+                        tint = Color(0xFF4A5568),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (searchQuery.isNotBlank() || selectedCategory != "Todos") "Nenhum canal encontrado para esta busca." else "Nenhum canal de TV disponível.",
+                        color = Color(0xFFA0A5B5),
+                        fontSize = 13.sp
+                    )
+                }
             }
+        } else if (isEpgView) {
+            EpgGuideView(channels = filtered, onPlay = onPlay)
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 150.dp),
@@ -1450,7 +1606,7 @@ fun LiveTvScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(filtered, key = { it.id }) { channel ->
-                    val isFav = channel.isFavorite || favorites.any { it.contentId == channel.id }
+                    val isFav = channel.isFavorite || favoriteIds.contains(channel.id)
                     LiveChannelGridCard(
                         channel = channel,
                         isFavorite = isFav,
@@ -1462,6 +1618,324 @@ fun LiveTvScreen(
         }
     }
 }
+
+private fun generateEpgPrograms(channel: LiveChannel): List<EpgProgram> {
+    val now = java.util.Calendar.getInstance()
+    val currentHour = now.get(java.util.Calendar.HOUR_OF_DAY)
+    val currentMinute = now.get(java.util.Calendar.MINUTE)
+    
+    val categoryName = channel.category.lowercase()
+    val isNews = categoryName.contains("notícia") || categoryName.contains("news") || categoryName.contains("jornal")
+    val isSports = categoryName.contains("esporte") || categoryName.contains("sport") || categoryName.contains("futebol")
+    val isMovies = categoryName.contains("filme") || categoryName.contains("movie") || categoryName.contains("cinema") || categoryName.contains("cine")
+    val isKids = categoryName.contains("infantil") || categoryName.contains("kids") || categoryName.contains("desenho") || categoryName.contains("cartoon")
+
+    val baseShows = when {
+        isNews -> listOf(
+            Triple("Jornal da Manhã", "Noticiário matutino com as principais notícias do dia e previsão do tempo.", "06:00 - 09:00"),
+            Triple("Plantão Brasil", "Cobertura ao vivo dos fatos políticos e econômicos nacionais.", "09:00 - 12:00"),
+            Triple("Telejornal 12H", "As notícias da sua região com apuração em tempo real e reportagens.", "12:00 - 15:00"),
+            Triple("Foco Global", "Análise internacional, geopolítica e economia mundial.", "15:00 - 18:00"),
+            Triple("Jornal da Noite", "O resumo completo dos acontecimentos de destaque do dia.", "18:00 - 21:00"),
+            Triple("Edição Especial", "Reportagens especiais, investigações e entrevistas exclusivas.", "21:00 - 00:00")
+        )
+        isSports -> listOf(
+            Triple("Mesa Redonda Matutina", "Debates quentes sobre o mundo do esporte e comentários editoriais.", "07:00 - 10:00"),
+            Triple("Central Esportiva", "Notícias, transferências, lesões e bastidores dos clubes.", "10:00 - 13:00"),
+            Triple("Futebol ao Vivo: Rodada Principal", "Transmissão exclusiva de partidas emocionantes com narração completa.", "13:00 - 17:00"),
+            Triple("Arena dos Campeões", "Análise tática pós-jogo, estatísticas e polêmicas de arbitragem.", "17:00 - 20:00"),
+            Triple("Esporte Total Prime", "Resumo das principais modalidades olímpicas e entrevistas.", "20:00 - 23:00"),
+            Triple("Melhores Momentos da Rodada", "Compacto dos gols, lances espetaculares e entrevistas.", "23:00 - 02:00")
+        )
+        isMovies -> listOf(
+            Triple("Cine Matinê: Aventura Suprema", "Filme de grande sucesso de bilheteria, aventura e magia.", "08:00 - 10:00"),
+            Triple("Sessão Drama & Emoção", "Histórias marcantes e premiadas que tocam o coração.", "10:00 - 12:30"),
+            Triple("Super Cine Tarde: Ação Total", "Efeitos visuais incríveis, perseguições e adrenalina pura.", "12:30 - 14:45"),
+            Triple("Cine Família", "Comédia leve e diversão garantida para todas as idades.", "14:45 - 17:00"),
+            Triple("Sessão Pipoca: Thriller & Mistério", "Suspense eletrizante e reviravoltas do início ao fim.", "17:00 - 19:30"),
+            Triple("Super Produção da Noite", "Estreia exclusiva de sucesso internacional com atores renomados.", "19:30 - 22:00"),
+            Triple("Cine Club da Meia-Noite", "Filmes aclamados pela crítica e clássicos cult.", "22:00 - 01:00")
+        )
+        isKids -> listOf(
+            Triple("Turma da Manhã Feliz", "Desenhos animados divertidos para os pequenos aprenderem brincando.", "06:00 - 09:00"),
+            Triple("Aventuras Mágicas", "Histórias encantadas, contos de fadas e muita alegria.", "09:00 - 12:00"),
+            Triple("Hora do Recreio Animada", "Séries infantis dinâmicas e brincadeiras interativas.", "12:00 - 15:00"),
+            Triple("Super Heróis Kids", "As missões mais empolgantes com desenhos de ação infantil.", "15:00 - 18:00"),
+            Triple("Cinema Infantil da Tarde", "Filme animado especial para toda a família curtir junta.", "18:00 - 20:00"),
+            Triple("Boa Noite Amiguinhos", "Desenhos relaxantes e historinhas para a hora de dormir.", "20:00 - 22:00")
+        )
+        else -> listOf(
+            Triple("Programa Manhã Total", "Variedades, entrevistas, saúde e entretenimento geral.", "07:00 - 10:00"),
+            Triple("Cozinha & Sabor", "Receitas deliciosas, chefs convidados e dicas culinárias.", "10:00 - 12:30"),
+            Triple("Show da Tarde", "Música ao vivo, humor, auditório e diversão para o seu dia.", "12:30 - 16:00"),
+            Triple("Série Especial: Mistérios", "Episódios sequenciais de grande sucesso internacional.", "16:00 - 19:00"),
+            Triple("Grandes Espetáculos", "Shows musicais, festivais e entretenimento premium.", "19:00 - 22:00"),
+            Triple("Sessão Noturna de Sucessos", "Filmes e séries selecionados especialmente para sua noite.", "22:00 - 01:00")
+        )
+    }
+
+    return baseShows.mapIndexed { index, (title, desc, timeRange) ->
+        val parts = timeRange.split(" - ")
+        val startStr = parts[0]
+        val endStr = parts[1]
+        
+        val startHour = startStr.substring(0, 2).toInt()
+        val endHour = endStr.substring(0, 2).toInt()
+        
+        val isCurrent = currentHour in startHour until endHour || (endHour < startHour && (currentHour >= startHour || currentHour < endHour))
+        
+        val progress = if (isCurrent) {
+            val totalMins = (endHour - startHour).let { if (it <= 0) it + 24 else it } * 60
+            val elapsedMins = (currentHour - startHour).let { if (it < 0) it + 24 else it } * 60 + currentMinute
+            (elapsedMins.toFloat() / totalMins.toFloat()).coerceIn(0f, 1f)
+        } else if (currentHour > endHour || (startHour > endHour && currentHour < startHour)) {
+            1f
+        } else {
+            0f
+        }
+
+        EpgProgram(
+            id = "${channel.id}_prog_$index",
+            channelId = channel.id,
+            title = title,
+            startTime = startStr,
+            endTime = endStr,
+            description = desc,
+            category = channel.category,
+            isLive = isCurrent,
+            progressPercent = progress
+        )
+    }
+}
+
+@Composable
+fun EpgGuideView(
+    channels: List<LiveChannel>,
+    onPlay: (String, String, ContentType) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = 24.dp)
+    ) {
+        items(channels, key = { it.id }) { channel ->
+            val programs = remember(channel.id) { generateEpgPrograms(channel) }
+            val currentProgram = programs.find { it.isLive } ?: programs.firstOrNull()
+            val upcomingPrograms = programs.filter { !it.isLive && it != currentProgram }
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp)),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF161926),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                tonalElevation = 2.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                    // Channel Header Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF10131F),
+                                modifier = Modifier.size(width = 54.dp, height = 36.dp),
+                                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f))
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (channel.logoUrl.isNullOrBlank()) {
+                                        Text(
+                                            text = channel.name.take(3).uppercase(),
+                                            color = OrangePrimary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    } else {
+                                        SubcomposeAsyncImage(
+                                            model = channel.logoUrl,
+                                            contentDescription = channel.name,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                }
+                            }
+
+                            Column {
+                                Text(
+                                    text = channel.name,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = channel.category,
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        // Play Channel Button
+                        Button(
+                            onClick = { onPlay(channel.streamUrl, channel.name, ContentType.LIVE) },
+                            colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Assistir",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color(0xFF23283B), thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Current Program card ("No Ar")
+                    if (currentProgram != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF1E2336),
+                            border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color.Red,
+                                            modifier = Modifier.padding(end = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = " NO AR ",
+                                                color = Color.White,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = "${currentProgram.startTime} - ${currentProgram.endTime}",
+                                            color = OrangePrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = currentProgram.title,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = currentProgram.description,
+                                    color = Color(0xFFB0B5C6),
+                                    fontSize = 11.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                Spacer(modifier = Modifier.height(6.dp))
+                                // Progress bar
+                                LinearProgressIndicator(
+                                    progress = { currentProgram.progressPercent },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(CircleShape),
+                                    color = OrangePrimary,
+                                    trackColor = Color(0xFF2D3245)
+                                )
+                            }
+                        }
+                    }
+
+                    // Upcoming Programs horizontal scroll row
+                    if (upcomingPrograms.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Próximos Programas:",
+                            color = Color(0xFF8E95A9),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(upcomingPrograms, key = { it.id }) { prog ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF121520),
+                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.06f)),
+                                    modifier = Modifier.width(180.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp)) {
+                                        Text(
+                                            text = "${prog.startTime} - ${prog.endTime}",
+                                            color = OrangePrimary.copy(alpha = 0.9f),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = prog.title,
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = prog.description,
+                                            color = Color(0xFF94A3B8),
+                                            fontSize = 10.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun LiveChannelGridCard(
@@ -1481,7 +1955,7 @@ fun LiveChannelGridCard(
         tonalElevation = 3.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Container superior da logo do canal (transparente e sem fundo preto)
+            // Container superior da logo do canal
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1522,6 +1996,34 @@ fun LiveChannelGridCard(
                     )
                 }
 
+                // Badge AO VIVO no canto superior esquerdo
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Red.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "AO VIVO",
+                            color = Color.White,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 // Botão de favorito circular translúcido no canto superior direito
                 Surface(
                     shape = CircleShape,
@@ -1547,7 +2049,7 @@ fun LiveChannelGridCard(
                 }
             }
 
-            // Área de texto inferior (Nome e categoria do canal)
+            // Área de texto inferior
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1683,9 +2185,8 @@ fun MoviesScreen(
     }
 
     // Destaques de Filmes (Carrossel Hero Banner - 100% TMDb API)
-    val movieHeroItems = remember(trendingMovies, movies) {
-        val source = if (trendingMovies.isNotEmpty()) trendingMovies else movies
-        source.filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
+    val movieHeroItems = remember(trendingMovies) {
+        trendingMovies.filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
             .take(8)
             .map { m ->
                 HeroBannerItem(
@@ -1722,19 +2223,8 @@ fun MoviesScreen(
         selectedCategoryForGrid = null
     }
 
-    // Layout: 1. Spotlight Banner (only if not searching/grid), 2. Fixed Search Bar & Categories, 3. Dynamic content below
+    // Layout: 1. Fixed Search Bar & Categories, 2. Dynamic content below (LazyColumn includes HeroBanner at top)
     Column(modifier = Modifier.fillMaxSize()) {
-        // Spotlight Banner em destaque (largura total, 0px bordas retas) - escondido na busca e grade para maximizar espaço de resultados
-        if (searchQuery.isBlank() && selectedCategoryForGrid == null) {
-            if (movieHeroItems.isNotEmpty()) {
-                SpotlightBannerCarousel(
-                    items = movieHeroItems,
-                    onPlay = onPlay,
-                    onOpenSeries = {},
-                    onOpenMovie = onOpenMovie
-                )
-            }
-        }
 
         // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable em Row horizontal para reter o foco e economizar espaço)
         Row(
@@ -1950,12 +2440,35 @@ fun MoviesScreen(
                 }
             }
         } else {
-            // VIEW 3: MAIN VIEW (Carrosséis por categoria)
+            // VIEW 3: MAIN VIEW (Carrosséis por categoria com Destaques no topo)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                if (movieHeroItems.isNotEmpty()) {
+                    item(key = "movie_hero_banner") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "EM DESTAQUE",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HeroBannerCarousel(
+                            items = movieHeroItems,
+                            onPlay = onPlay,
+                            onOpenSeries = {},
+                            onOpenMovie = onOpenMovie
+                        )
+                    }
+                }
                 categoriesMap.forEach { (catName, catMovies) ->
                     item(key = "cat_$catName") {
                         Column(
@@ -3129,9 +3642,8 @@ fun SeriesScreen(
     }
 
     // Destaques de Séries (Carrossel Hero Banner - 100% TMDb API)
-    val seriesHeroItems = remember(popularSeries, seriesList) {
-        val source = if (popularSeries.isNotEmpty()) popularSeries else seriesList
-        source.filter { !it.posterUrl.isNullOrBlank() || !it.backdropUrl.isNullOrBlank() }
+    val seriesHeroItems = remember(popularSeries) {
+        popularSeries.filter { !it.posterUrl.isNullOrBlank() || !it.backdropUrl.isNullOrBlank() }
             .take(8)
             .map { s ->
                 val firstEpUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: ""
@@ -3176,20 +3688,8 @@ fun SeriesScreen(
         }
     }
 
-    // Layout: Spotlight Banner no topo (largura total 100%, 0px bordas),
-    // seguido diretamente pela Busca e botão pílula de Categorias
+    // Layout: Search Bar & Categories, seguido dinamicamente pelo LazyColumn
     Column(modifier = Modifier.fillMaxSize()) {
-        // Spotlight Banner em destaque (largura total, 0px bordas retas) - escondido na busca e grade para maximizar espaço de resultados
-        if (searchQuery.isBlank() && selectedCategoryForGrid == null) {
-            if (seriesHeroItems.isNotEmpty()) {
-                SpotlightBannerCarousel(
-                    items = seriesHeroItems,
-                    onPlay = { _, _, _ -> },
-                    onOpenSeries = { onOpenSeriesItem(it) },
-                    onOpenMovie = {}
-                )
-            }
-        }
 
         // Barra de Busca e Botão Categorias FIXO (Mesmo nó Composable em Row horizontal para reter o foco e economizar espaço)
         Row(
@@ -3397,12 +3897,35 @@ fun SeriesScreen(
                 }
             }
         } else {
-            // VIEW 3: MAIN VIEW (Carrosséis por categoria)
+            // VIEW 3: MAIN VIEW (Carrosséis por categoria com Destaques no topo)
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                if (seriesHeroItems.isNotEmpty()) {
+                    item(key = "series_hero_banner") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "EM DESTAQUE",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HeroBannerCarousel(
+                            items = seriesHeroItems,
+                            onPlay = { _, _, _ -> },
+                            onOpenSeries = { onOpenSeriesItem(it) },
+                            onOpenMovie = {}
+                        )
+                    }
+                }
                 // Carrosséis de cada categoria
                 categoriesMap.forEach { (catName, catSeries) ->
                     item(key = "cat_$catName") {
