@@ -56,12 +56,11 @@ O repositório já possui a automação de CI/CD configurada em `.github/workflo
 
 | Arquivo | Plataforma | Modificações Realizadas |
 | :--- | :--- | :--- |
-| `Screens.kt` | Android (Kotlin) | • Altura de `SpotlightBannerCarousel` aumentada para `160.dp` (+20%).<br>• Parâmetro `searchScope` adicionado ao `GlobalSearchScreen` para filtrar por `MOVIE` ou `SERIES`.<br>• Correção e balanceamento definitivo de escopos `{}`. |
-| `FoxStreamApp.kt` | Android (Kotlin) | • Estado `searchScope` instanciado e repassado para `GlobalSearchScreen`.<br>• Disparo de busca a partir de Filmes e Séries configurado com seus respectivos escopos. |
-| `MoviesScreen.tsx` | Web (React) | • Banner de destaques ajustado para `h-[215px]`.<br>• Botão de busca integrado à mesma linha do seletor de categorias. |
-| `SeriesScreen.tsx` | Web (React) | • Banner de destaques ajustado para `h-[215px]`.<br>• Busca e categorias alinhados na mesma linha horizontal. |
-| `SearchModal.tsx` | Web (React) | • Suporte à prop `searchScope?: 'ALL' \| 'MOVIE' \| 'SERIES'`.<br>• Filtro estrito de resultados de acordo com o escopo selecionado e textos explicativos contextuais. |
-| `App.tsx` | Web (React) | • Estado `searchScope` conectado entre abas e o modal de busca. |
+| `HomeScreen.tsx` | Web (React) | • "Continue Assistindo" agora permanece sempre visível na Home.<br>• Exibe card vazio moderno e convidativo com atalhos rápidos quando não há histórico.<br>• Reprodução direta com 1 clique ao selecionar card do histórico e exclusão instantânea. |
+| `storageService.ts` | Web (React) | • Adicionado fallback para chaves de histórico legadas e sincronização resiliente. |
+| `Screens.kt` | Android (Kotlin) | • Altura de `SpotlightBannerCarousel` aumentada para `160.dp` (+20%).<br>• Parâmetro `searchScope` adicionado ao `GlobalSearchScreen`.<br>• Seção "Continue Assistindo" garantida com card informativo de estado vazio. |
+| `FoxStreamApp.kt` | Android (Kotlin) | • Estado `searchScope` instanciado e repassado para `GlobalSearchScreen`. |
+| `App.tsx` | Web (React) | • `handlePlayHistory` agora atualiza o carimbo de data/hora para manter o item no topo do histórico. |
 
 ---
 

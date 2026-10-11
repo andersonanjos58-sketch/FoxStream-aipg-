@@ -389,7 +389,10 @@ export class StorageService {
    */
   public static getHistory(): HistoryItem[] {
     try {
-      const data = safeStorage.getItem(STORAGE_KEYS.HISTORY);
+      let data = safeStorage.getItem(STORAGE_KEYS.HISTORY);
+      if (!data) {
+        data = safeStorage.getItem('foxstream_history');
+      }
       if (!data) return [];
       const parsed = JSON.parse(data);
       return Array.isArray(parsed) ? parsed : [];

@@ -183,7 +183,7 @@ export default function App() {
     reloadContent(id);
   };
 
-  // Play a Live Channel
+  // Play a Live Channel (Modal playback from Search/Favorites/Home)
   const handlePlayChannel = (channel: LiveChannel) => {
     const healedUrl = fixXtreamStreamUrl(channel.streamUrl);
 
@@ -211,6 +211,23 @@ export default function App() {
       type: 'live'
     });
   };
+
+  // Record history for in-page Live TV channel playback without opening modal
+  const handleRecordLiveChannelHistory = useCallback((channel: LiveChannel) => {
+    const healedUrl = fixXtreamStreamUrl(channel.streamUrl);
+    const historyItem: HistoryItem = {
+      id: `hist_${Date.now()}`,
+      contentId: channel.id,
+      title: channel.name,
+      type: 'live',
+      posterUrl: channel.logoUrl,
+      playedAt: new Date().toISOString(),
+      timestamp: Date.now(),
+      streamUrl: healedUrl
+    };
+    StorageService.addToHistory(historyItem);
+    setHistory(StorageService.getHistory());
+  }, [fixXtreamStreamUrl]);
 
   // Play a Movie
   const handlePlayMovie = (movie: MovieItem) => {
@@ -327,6 +344,23 @@ export default function App() {
   const handlePlayHistory = (item: HistoryItem) => {
     if (item.streamUrl) {
       const healedUrl = fixXtreamStreamUrl(item.streamUrl);
+
+      // Refresh item in history so it stays at the top of Continue Watching
+      const updatedHistoryItem: HistoryItem = {
+        id: `hist_${Date.now()}`,
+        contentId: item.contentId,
+        title: item.title,
+        type: item.type,
+        posterUrl: item.posterUrl,
+        playedAt: new Date().toISOString(),
+        timestamp: Date.now(),
+        seriesName: item.seriesName,
+        seasonEpisode: item.seasonEpisode,
+        streamUrl: healedUrl
+      };
+      StorageService.addToHistory(updatedHistoryItem);
+      setHistory(StorageService.getHistory());
+
       setPlaybackDialog({
         isOpen: true,
         title: item.title,
@@ -570,6 +604,9 @@ export default function App() {
               onToggleFavorite={(c) => handleToggleFavorite(c, 'live')}
               isFavorite={isFavorite}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+              fixXtreamStreamUrl={fixXtreamStreamUrl}
+              onRecordHistory={handleRecordLiveChannelHistory}
+              isActiveTab={currentTab === 'live'}
             />
           </div>
         )}

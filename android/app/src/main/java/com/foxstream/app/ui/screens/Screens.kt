@@ -978,6 +978,7 @@ fun HomeScreen(
                                                 }
                                             }
                                         }
+
                                         Text(
                                             text = item.title,
                                             fontWeight = FontWeight.SemiBold,
@@ -1047,6 +1048,58 @@ fun HomeScreen(
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+            } else {
+                item {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    SectionHeader("Continue Assistindo")
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        border = BorderStroke(1.dp, Color(0xFF262626))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = OrangePrimary.copy(alpha = 0.15f),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = null,
+                                        tint = OrangePrimary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Nenhum conteúdo no histórico ainda",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Os canais, filmes e séries que você assistir aparecerão aqui.",
+                                    color = Color.Gray,
+                                    fontSize = 11.sp
+                                )
                             }
                         }
                     }

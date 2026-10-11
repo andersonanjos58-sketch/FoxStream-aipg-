@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { LiveChannel, MovieItem, SeriesItem, HistoryItem, FavoriteItem, Playlist } from '../types';
 import { TmdbService } from '../services/tmdbService';
+import { StorageService } from '../services/storageService';
 
 interface HomeScreenProps {
   activePlaylist: Playlist | null;
@@ -210,6 +211,41 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 }) => {
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
+
+  // Synchronize history state with prop and StorageService
+  const [localHistory, setLocalHistory] = useState<HistoryItem[]>(() => {
+    if (history && history.length > 0) return history;
+    return StorageService.getHistory();
+  });
+
+  useEffect(() => {
+    if (history && history.length > 0) {
+      setLocalHistory(history);
+    } else {
+      setLocalHistory(StorageService.getHistory());
+    }
+  }, [history]);
+
+  // Format played timestamp into human-readable relative Portuguese text
+  const formatPlayedAt = (isoString?: string): string => {
+    if (!isoString) return 'Assistido recentemente';
+    try {
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      if (diffMin < 1) return 'Agora mesmo';
+      if (diffMin < 60) return `Há ${diffMin} min`;
+      const diffHours = Math.floor(diffMin / 60);
+      if (diffHours < 24) return `Há ${diffHours}h`;
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays === 1) return 'Ontem';
+      if (diffDays < 7) return `Há ${diffDays} dias`;
+      return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    } catch {
+      return 'Assistido recentemente';
+    }
+  };
 
   // Carousel scroll helpers
   const scrollRef = (element: HTMLDivElement | null, distance: number) => {
@@ -722,139 +758,141 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
       )}
 
-      {/* SECTION 1: CONTINUE ASSISTINDO (History) */}
+      {/* MAIN HOMESCREEN SECTIONS */}
       {selectedCategory === 'Todos' && (
         <>
-          {history.length > 0 && (
+          {/* SECTION 1: CONTINUE ASSISTINDO (History) - Visible only when there are items */}
+          {localHistory.length > 0 && (
             <section className="px-4 max-w-7xl mx-auto space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-orange-400" />
-                  <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
-                    Continue Assistindo
-                  </h2>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => scrollRef(historyRef.current, -300)}
-                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => scrollRef(historyRef.current, 300)}
-                    className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white cursor-pointer"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
+                <Clock className="w-3.5 h-3.5 stroke-[2.2]" />
               </div>
-
-              <div
-                ref={historyRef}
-                className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+              <h2 className="text-base sm:text-lg font-bold text-white font-['Outfit']">
+                Continue Assistindo
+              </h2>
+              <span className="text-[10px] font-semibold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded-full border border-orange-500/20">
+                {localHistory.length} {localHistory.length === 1 ? 'item' : 'itens'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => scrollRef(historyRef.current, -300)}
+                className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white cursor-pointer transition-colors"
+                aria-label="Rolar para esquerda"
               >
-                {history.slice(0, 15).map((item) => {
-                  const isSelected = selectedHistoryId === item.id;
-                  const seriesMatch = item.type === 'series'
-                    ? series.find(s => 
-                        s.name.toLowerCase() === (item.seriesName || item.title.split(' - ')[0]).trim().toLowerCase() ||
-                        item.title.toLowerCase().startsWith(s.name.toLowerCase()) ||
-                        s.seasons?.some(se => se.episodes?.some(ep => ep.streamUrl === item.streamUrl))
-                      )
-                    : null;
-                  const itemPoster = item.type === 'series'
-                    ? (seriesMatch?.posterUrl || item.posterUrl)
-                    : (item.posterUrl || (item.type === 'movie' ? movies.find(m => m.streamUrl === item.streamUrl)?.posterUrl : channels.find(ch => ch.streamUrl === item.streamUrl)?.logoUrl));
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollRef(historyRef.current, 300)}
+                className="p-1 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white cursor-pointer transition-colors"
+                aria-label="Rolar para direita"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
 
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedHistoryId(isSelected ? null : item.id);
-                      }}
-                      className={`group relative flex-shrink-0 w-60 sm:w-72 p-3 rounded-2xl bg-neutral-900/80 hover:bg-neutral-800/80 border transition-all cursor-pointer ${
-                        isSelected 
-                          ? 'border-orange-500 shadow-lg shadow-orange-950/40 ring-1 ring-orange-500/50' 
-                          : 'border-neutral-800/90 hover:border-orange-500/50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 shrink-0 group-hover:scale-105 transition-transform overflow-hidden">
-                          {itemPoster ? (
-                            <img 
-                              src={itemPoster} 
-                              alt={item.title}
-                              loading="lazy"
-                              decoding="async"
-                              className="w-full h-full object-cover rounded-xl"
-                              onError={(e) => {
-                                (e.target as HTMLElement).style.display = 'none';
-                              }}
-                            />
-                          ) : (
-                            <Play className="w-5 h-5 fill-orange-500 stroke-none ml-0.5" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <span className="text-[9px] uppercase font-bold text-orange-400 tracking-wider">
-                            {item.type === 'live' ? 'TV ao Vivo' : item.type === 'movie' ? 'Filme' : 'Série'}
-                          </span>
-                          <h4 className="text-xs font-bold text-white truncate mt-0.5">
-                            {item.title}
-                          </h4>
-                          {item.seriesName && (
-                            <p className="text-[10px] text-neutral-400 truncate">
-                              {item.seriesName} {item.seasonEpisode ? `(${item.seasonEpisode})` : ''}
-                            </p>
-                          )}
-                        </div>
+          <div
+            ref={historyRef}
+            className="flex items-center gap-3 overflow-x-auto no-scrollbar pb-2 pt-1"
+          >
+            {localHistory.slice(0, 20).map((item) => {
+              const seriesMatch = item.type === 'series'
+                ? series.find(s => 
+                    s.name.toLowerCase() === (item.seriesName || item.title.split(' - ')[0]).trim().toLowerCase() ||
+                    item.title.toLowerCase().startsWith(s.name.toLowerCase()) ||
+                    s.seasons?.some(se => se.episodes?.some(ep => ep.streamUrl === item.streamUrl))
+                  )
+                : null;
+              const itemPoster = item.type === 'series'
+                ? (seriesMatch?.posterUrl || item.posterUrl)
+                : (item.posterUrl || (item.type === 'movie' ? movies.find(m => m.streamUrl === item.streamUrl)?.posterUrl : channels.find(ch => ch.streamUrl === item.streamUrl)?.logoUrl));
+
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => onPlayHistoryItem(item)}
+                  className="group relative flex-shrink-0 w-64 sm:w-72 p-3 rounded-2xl bg-[#11131b] hover:bg-[#161924] border border-neutral-800/90 hover:border-orange-500/60 transition-all cursor-pointer shadow-md hover:shadow-orange-950/20 active:scale-98 select-none"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-14 h-14 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center justify-center text-orange-400 shrink-0 group-hover:scale-105 transition-transform overflow-hidden shadow-inner">
+                      {itemPoster ? (
+                        <img 
+                          src={itemPoster} 
+                          alt={item.title}
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover rounded-xl"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : item.type === 'live' ? (
+                        <Tv className="w-6 h-6 text-orange-400" />
+                      ) : item.type === 'movie' ? (
+                        <Film className="w-6 h-6 text-amber-400" />
+                      ) : (
+                        <Clapperboard className="w-6 h-6 text-rose-400" />
+                      )}
+
+                      {/* Hover play icon badge */}
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <Play className="w-5 h-5 fill-white text-white drop-shadow ml-0.5" />
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 flex-1 pr-6">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[9px] uppercase font-black px-1.5 py-0.2 rounded tracking-wider ${
+                          item.type === 'live' 
+                            ? 'bg-orange-500/15 text-orange-400 border border-orange-500/30' 
+                            : item.type === 'movie' 
+                              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' 
+                              : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                        }`}>
+                          {item.type === 'live' ? 'TV ao Vivo' : item.type === 'movie' ? 'Filme' : 'Série'}
+                        </span>
                       </div>
 
-                      {/* Active controls overlay on selected card */}
-                      {isSelected && (
-                        <div 
-                          className="absolute inset-0 z-20 rounded-2xl bg-black/75 backdrop-blur-[2px] flex items-center justify-center transition-all animate-in fade-in duration-200"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedHistoryId(null);
-                          }}
-                        >
-                          <button
-                            type="button"
-                            title="Remover de Continue Assistindo"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedHistoryId(null);
-                              onRemoveHistoryItem?.(item.id);
-                            }}
-                            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-neutral-800 border border-white/15 flex items-center justify-center text-red-500 hover:text-red-400 transition-colors shadow-md active:scale-90 cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4 stroke-[2.2]" />
-                          </button>
+                      <h4 className="text-xs font-bold text-neutral-100 group-hover:text-orange-400 truncate mt-1 transition-colors">
+                        {item.title}
+                      </h4>
 
-                          <button
-                            type="button"
-                            title="Continuar reprodução"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedHistoryId(null);
-                              onPlayHistoryItem(item);
-                            }}
-                            className="w-11 h-11 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-lg shadow-orange-950/70 transition-transform hover:scale-105 active:scale-95 cursor-pointer"
-                          >
-                            <Play className="w-5 h-5 fill-white stroke-none ml-0.5" />
-                          </button>
-                        </div>
+                      {item.seriesName && (
+                        <p className="text-[10px] text-neutral-400 truncate mt-0.5 font-medium">
+                          {item.seriesName} {item.seasonEpisode ? `(${item.seasonEpisode})` : ''}
+                        </p>
                       )}
+
+                      <p className="text-[10px] text-neutral-500 truncate mt-1">
+                        {formatPlayedAt(item.playedAt)}
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+                  </div>
+
+                  {/* Quick remove button */}
+                  <button
+                    type="button"
+                    title="Remover de Continue Assistindo"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveHistoryItem?.(item.id);
+                      setLocalHistory(prev => prev.filter(h => h.id !== item.id));
+                    }}
+                    className="absolute top-2.5 right-2.5 w-7 h-7 rounded-lg bg-neutral-900/80 hover:bg-red-500/20 text-neutral-500 hover:text-red-400 border border-neutral-800 hover:border-red-500/40 flex items-center justify-center transition-all cursor-pointer shadow-sm active:scale-90"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* SECTION 2: FAVORITOS */}
       {favorites.length > 0 && (
