@@ -1834,11 +1834,13 @@ fun LiveTvScreen(
                                             .size(32.dp)
                                             .clickable {
                                                 if (isPlaying) {
-                                                    exoPlayer.pause()
+                                                    vlcMediaPlayer.pause()
                                                     isPaused = true
+                                                    isPlaying = false
                                                 } else {
-                                                    exoPlayer.play()
+                                                    vlcMediaPlayer.play()
                                                     isPaused = false
+                                                    isPlaying = true
                                                 }
                                             }
                                     ) {
