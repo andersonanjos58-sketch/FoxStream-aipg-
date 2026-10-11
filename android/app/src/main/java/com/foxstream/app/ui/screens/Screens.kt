@@ -1692,7 +1692,7 @@ fun LiveTvScreen(
                         }
 
                         // Top Overlay (Channel Info, Live Badge & Favorite)
-                        AnimatedVisibility(
+                        androidx.compose.animation.AnimatedVisibility(
                             visible = showControls || !isPlaying,
                             enter = fadeIn(),
                             exit = fadeOut(),
@@ -1809,7 +1809,7 @@ fun LiveTvScreen(
                         }
 
                         // Bottom Overlay (Controls: Play/Pause, Mute, Reload, Fullscreen)
-                        AnimatedVisibility(
+                        androidx.compose.animation.AnimatedVisibility(
                             visible = showControls || !isPlaying,
                             enter = fadeIn(),
                             exit = fadeOut(),
