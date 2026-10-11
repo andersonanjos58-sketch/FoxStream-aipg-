@@ -1488,6 +1488,7 @@ fun LiveTvScreen(
                 val mediaItem = MediaItem.fromUri(streamUrl)
                 exoPlayer.setMediaItem(mediaItem)
                 exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
                 if (!isPaused) {
                     exoPlayer.play()
                 }
@@ -1692,10 +1693,8 @@ fun LiveTvScreen(
                         }
 
                         // Top Overlay (Channel Info, Live Badge & Favorite)
-                        androidx.compose.animation.AnimatedVisibility(
+                        LivePlayerAnimatedVisibility(
                             visible = showControls || !isPlaying,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
                             modifier = Modifier.align(Alignment.TopCenter)
                         ) {
                             Row(
@@ -1809,10 +1808,8 @@ fun LiveTvScreen(
                         }
 
                         // Bottom Overlay (Controls: Play/Pause, Mute, Reload, Fullscreen)
-                        androidx.compose.animation.AnimatedVisibility(
+                        LivePlayerAnimatedVisibility(
                             visible = showControls || !isPlaying,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
                             modifier = Modifier.align(Alignment.BottomCenter)
                         ) {
                             Row(
@@ -5347,3 +5344,21 @@ fun GlobalSearchScreen(
         }
     }
 }
+
+@Composable
+fun LivePlayerAnimatedVisibility(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    enter: EnterTransition = fadeIn(),
+    exit: ExitTransition = fadeOut(),
+    content: @Composable AnimatedVisibilityScope.() -> Unit
+) {
+    androidx.compose.animation.AnimatedVisibility(
+        visible = visible,
+        enter = enter,
+        exit = exit,
+        modifier = modifier,
+        content = content
+    )
+}
+

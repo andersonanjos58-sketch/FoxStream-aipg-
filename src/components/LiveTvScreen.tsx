@@ -154,13 +154,11 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     };
   }, [filteredChannels.length, visibleLimit]);
 
-  // Helper for playable stream URL with proxy
+  // Helper for playable stream URL (exact link from list with healed credentials)
   const getPlayableUrl = useCallback((rawUrl: string): string => {
     if (!rawUrl) return '';
     const healed = fixXtreamStreamUrl ? fixXtreamStreamUrl(rawUrl) : rawUrl;
-    if (healed.startsWith('blob:') || healed.startsWith('data:')) return healed;
-    if (healed.startsWith('/api/proxy') || healed.includes('/api/proxy?url=')) return healed;
-    return `/api/proxy?url=${encodeURIComponent(healed)}`;
+    return healed;
   }, [fixXtreamStreamUrl]);
 
   // Auto-hide controls timer

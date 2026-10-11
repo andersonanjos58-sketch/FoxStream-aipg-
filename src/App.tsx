@@ -144,12 +144,23 @@ export default function App() {
   // Helper to dynamically inject fresh/correct credentials into Xtream stream URLs.
   // This heals any cached streams that might have stale or corrupt username/password strings.
   const fixXtreamStreamUrl = useCallback((url: string): string => {
-    if (!url || !activePlaylist || activePlaylist.type !== 'xtream') return url;
+    if (!url) return url;
+    let absoluteUrl = url;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (activePlaylist && activePlaylist.serverUrl) {
+        const base = activePlaylist.serverUrl.replace(/\/+$/, '');
+        absoluteUrl = url.startsWith('/') ? `${base}${url}` : `${base}/${url}`;
+      } else {
+        return url;
+      }
+    }
+
+    if (!activePlaylist || activePlaylist.type !== 'xtream') return absoluteUrl;
     const { serverUrl, username, password } = activePlaylist;
-    if (!serverUrl || !username || !password) return url;
+    if (!serverUrl || !username || !password) return absoluteUrl;
 
     try {
-      const urlObj = new URL(url);
+      const urlObj = new URL(absoluteUrl);
       const pathParts = urlObj.pathname.split('/');
       
       // Xtream URL formats have live/username/password/id, movie/username/password/id, or series/username/password/id
@@ -169,13 +180,12 @@ export default function App() {
         }
         
         const finalHealedUrl = urlObj.toString();
-        console.log(`[Xtream Heal] Input: ${url.replace(/\/[^/]+\/[^/]+\/(\d+)/, '/***/***/$1')} -> Output: ${finalHealedUrl.replace(/\/[^/]+\/[^/]+\/(\d+)/, '/***/***/$1')}`);
         return finalHealedUrl;
       }
     } catch (err) {
       console.warn('Failed to heal Xtream URL:', err);
     }
-    return url;
+    return absoluteUrl;
   }, [activePlaylist]);
 
   // Change active playlist

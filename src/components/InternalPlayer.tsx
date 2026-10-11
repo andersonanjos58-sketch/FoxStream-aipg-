@@ -98,7 +98,19 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({
     if (!url) return '';
     if (url.startsWith('blob:') || url.startsWith('data:')) return url;
     if (url.startsWith('/api/proxy') || url.includes('/api/proxy?url=')) return url;
-    return `/api/proxy?url=${encodeURIComponent(url)}`;
+
+    let absoluteUrl = url;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      const activeId = StorageService.getActivePlaylistId();
+      const playlists = StorageService.getPlaylists();
+      const activePl = playlists.find(p => p.id === activeId);
+      if (activePl && activePl.serverUrl) {
+        const base = activePl.serverUrl.replace(/\/+$/, '');
+        absoluteUrl = url.startsWith('/') ? `${base}${url}` : `${base}/${url}`;
+      }
+    }
+
+    return `/api/proxy?url=${encodeURIComponent(absoluteUrl)}`;
   };
 
   const sanitizeUrlForError = (url: string): string => {
