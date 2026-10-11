@@ -58,6 +58,11 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.util.VLCVideoLayout
+import android.net.Uri
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import com.foxstream.app.R
@@ -1423,50 +1428,40 @@ fun LiveTvScreen(
         }
     }
 
-    // Dedicated embedded ExoPlayer instance
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            repeatMode = Player.REPEAT_MODE_OFF
+    // Dedicated LibVLC instance for embedded Live TV player
+    val libVLC = remember(context) {
+        val options = ArrayList<String>().apply {
+            add("--http-reconnect")
+            add("--network-caching=5000")
+            add("-vvv")
         }
+        val instance = LibVLC(context, options)
+        instance.setUserAgent("FoxStream", "VLC/3.0.18 LibVLC/3.0.18")
+        instance
     }
 
-    DisposableEffect(exoPlayer) {
-        val listener = object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                when (state) {
-                    Player.STATE_BUFFERING -> isLoadingStream = true
-                    Player.STATE_READY -> {
-                        isLoadingStream = false
-                        playerError = null
-                    }
-                    Player.STATE_ENDED -> isLoadingStream = false
-                    Player.STATE_IDLE -> {}
-                }
-            }
+    val vlcMediaPlayer = remember(libVLC) {
+        MediaPlayer(libVLC)
+    }
 
-            override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
-                if (playing) isLoadingStream = false
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                isLoadingStream = false
-                playerError = "Não foi possível carregar a transmissão ao vivo."
-            }
-        }
-        exoPlayer.addListener(listener)
+    DisposableEffect(libVLC, vlcMediaPlayer) {
         onDispose {
-            exoPlayer.removeListener(listener)
+            vlcMediaPlayer.stop()
+            vlcMediaPlayer.detachViews()
+            vlcMediaPlayer.release()
+            libVLC.release()
         }
     }
 
-    DisposableEffect(lifecycleOwner, exoPlayer) {
+    DisposableEffect(lifecycleOwner, vlcMediaPlayer) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE -> exoPlayer.pause()
+                Lifecycle.Event.ON_PAUSE -> {
+                    vlcMediaPlayer.pause()
+                }
                 Lifecycle.Event.ON_RESUME -> {
                     if (!isPaused && activeChannel != null) {
-                        exoPlayer.play()
+                        vlcMediaPlayer.play()
                     }
                 }
                 else -> {}
@@ -1475,7 +1470,6 @@ fun LiveTvScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            exoPlayer.release()
         }
     }
 
@@ -1485,13 +1479,20 @@ fun LiveTvScreen(
             isLoadingStream = true
             playerError = null
             try {
-                val mediaItem = MediaItem.fromUri(streamUrl)
-                exoPlayer.setMediaItem(mediaItem)
-                exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
-                if (!isPaused) {
-                    exoPlayer.play()
+                val cleanedUrl = streamUrl.trim().replace("\r", "").replace("\n", "").replace(" ", "%20")
+                val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
+                    addOption(":http-user-agent=VLC/3.0.18 LibVLC/3.0.18")
+                    addOption(":http-referrer=")
+                    addOption(":http-reconnect=1")
+                    addOption(":network-caching=5000")
                 }
+                vlcMediaPlayer.media = media
+                media.release()
+                if (!isPaused) {
+                    vlcMediaPlayer.play()
+                    isPlaying = true
+                }
+                isLoadingStream = false
             } catch (e: Exception) {
                 isLoadingStream = false
                 playerError = "Falha ao carregar URL do canal."
@@ -1500,7 +1501,7 @@ fun LiveTvScreen(
     }
 
     LaunchedEffect(isMuted) {
-        exoPlayer.volume = if (isMuted) 0f else 1f
+        vlcMediaPlayer.volume = if (isMuted) 0 else 100
     }
 
     LaunchedEffect(showControls, isPlaying) {
@@ -1598,11 +1599,8 @@ fun LiveTvScreen(
                     ) {
                         AndroidView(
                             factory = { ctx ->
-                                PlayerView(ctx).apply {
-                                    useController = false
-                                    player = exoPlayer
-                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                    keepScreenOn = true
+                                VLCVideoLayout(ctx).apply {
+                                    vlcMediaPlayer.attachViews(this, null, true, true)
                                 }
                             },
                             modifier = Modifier.fillMaxSize()
