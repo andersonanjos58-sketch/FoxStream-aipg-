@@ -673,19 +673,6 @@ fun PlayerScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                if (!isInPipMode) {
-                    showControls = !showControls
-                }
-            }
-    ) {
         // Main Video Player view (VLC with fallback to ExoPlayer)
         if (useVlc) {
             AndroidView(
@@ -743,6 +730,20 @@ fun PlayerScreen(
                 modifier = Modifier.fillMaxSize()
             )
         }
+
+        // Click catcher overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    if (!isInPipMode) {
+                        showControls = !showControls
+                    }
+                }
+        )
 
         // Floating Video Scale Indicator overlay
         AnimatedVisibility(
