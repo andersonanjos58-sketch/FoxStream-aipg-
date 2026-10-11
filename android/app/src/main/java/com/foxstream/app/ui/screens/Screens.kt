@@ -1574,32 +1574,25 @@ fun LiveTvScreen(
     val nextActiveProgram = activeEpgPrograms.firstOrNull { !it.isLive && it != currentActiveProgram }
 
     Column(
-        modifier = if (isFullScreen) {
-            Modifier.fillMaxSize()
-        } else {
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        },
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = if (isFullScreen) Arrangement.Top else Arrangement.spacedBy(10.dp)
     ) {
         // ==========================================
         // 1. TOP EMBEDDED PLAYER CONTAINER
         // ==========================================
         if (activeChannel != null) {
-            Surface(
-                modifier = if (isFullScreen) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                },
-                shape = if (isFullScreen) RectangleShape else RoundedCornerShape(16.dp),
-                color = Color(0xFF0F111A),
-                border = BorderStroke(1.dp, Color(0xFF23283B)),
-                tonalElevation = 6.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (!isFullScreen) Modifier.weight(0.3f) else Modifier.weight(1f))
             ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    shape = if (isFullScreen) RectangleShape else RoundedCornerShape(16.dp),
+                    color = Color(0xFF0F111A),
+                    border = BorderStroke(1.dp, Color(0xFF23283B)),
+                    tonalElevation = 6.dp
+                ) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     // Video View Box with Overlays
                     Box(
@@ -1946,7 +1939,7 @@ fun LiveTvScreen(
                     }
 
                     // EPG Mini Bar under Video
-                    if (currentActiveProgram != null) {
+                    if (currentActiveProgram != null && !isFullScreen) {
                         Surface(
                             color = Color(0xFF141724),
                             modifier = Modifier.fillMaxWidth()
