@@ -1380,20 +1380,20 @@ fun LiveTvScreen(
             .distinct()
             .sorted()
         val hasFavs = channels.any { it.isFavorite || favoriteIds.contains(it.id) }
-        val list = mutableListOf("Todos")
+        val list = mutableListOf("Todos os canais")
         if (hasFavs) {
             list.add("❤️ Favoritos")
         }
         list.addAll(baseCategories)
         list
     }
-    var selectedCategory by remember { mutableStateOf("Todos") }
+    var selectedCategory by remember { mutableStateOf("Todos os canais") }
 
     // Perform filtering on Dispatchers.Default
     LaunchedEffect(debouncedSearchQuery, selectedCategory, channels, favorites, sortAlphabetically) {
         val result = withContext(Dispatchers.Default) {
             var list = when {
-                selectedCategory == "Todos" -> channels
+                selectedCategory == "Todos os canais" || selectedCategory == "Todos" -> channels
                 selectedCategory == "❤️ Favoritos" -> channels.filter { it.isFavorite || favoriteIds.contains(it.id) }
                 else -> channels.filter { it.category.equals(selectedCategory, ignoreCase = true) }
             }
@@ -1411,208 +1411,276 @@ fun LiveTvScreen(
         filtered = result
     }
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Search bar & Sort toggle row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // Left Sidebar: Categories (~160.dp wide)
+        Surface(
+            modifier = Modifier
+                .width(160.dp)
+                .fillMaxHeight(),
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF161926),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Buscar canal ao vivo...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+            Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                Text(
+                    text = "Categorias",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(bottom = 8.dp)
+                ) {
+                    items(categories) { cat ->
+                        val isSelected = cat == selectedCategory
+                        val count = when {
+                            cat == "Todos os canais" || cat == "Todos" -> channels.size
+                            cat == "❤️ Favoritos" -> channels.count { it.isFavorite || favoriteIds.contains(it.id) }
+                            else -> channels.count { it.category.equals(cat, ignoreCase = true) }
+                        }
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { selectedCategory = cat },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) OrangePrimary else Color(0xFF10131F),
+                            border = BorderStroke(0.5.dp, if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.05f))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = cat,
+                                    color = if (isSelected) Color.White else Color(0xFFB0B5C6),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "$count",
+                                    color = if (isSelected) Color.White.copy(alpha = 0.8f) else Color(0xFF64748B),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
-                },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = OrangePrimary,
-                    unfocusedBorderColor = Color(0xFF2D3245),
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                )
-            )
+                }
+            }
+        }
 
-            // Sort button
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (sortAlphabetically) OrangePrimary else Color(0xFF1C2030),
-                border = BorderStroke(1.dp, if (sortAlphabetically) OrangePrimary else Color(0xFF2D3245)),
-                modifier = Modifier
-                    .height(52.dp)
-                    .clickable { sortAlphabetically = !sortAlphabetically }
+        // Right Content Area
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+        ) {
+            // Search bar & Sort toggle row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Buscar canal ao vivo...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = OrangePrimary) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray)
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = OrangePrimary,
+                        unfocusedBorderColor = Color(0xFF2D3245),
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+
+                // Sort button
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (sortAlphabetically) OrangePrimary else Color(0xFF1C2030),
+                    border = BorderStroke(1.dp, if (sortAlphabetically) OrangePrimary else Color(0xFF2D3245)),
+                    modifier = Modifier
+                        .height(52.dp)
+                        .clickable { sortAlphabetically = !sortAlphabetically }
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (sortAlphabetically) "A-Z" else "Ordem",
+                            color = if (sortAlphabetically) Color.White else Color(0xFFB0B5C6),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // View Mode Switcher (Grid vs EPG Guide)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (!isEpgView) OrangePrimary else Color(0xFF1C2030),
+                    border = BorderStroke(1.dp, if (!isEpgView) OrangePrimary else Color(0xFF2D3245)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .clickable { isEpgView = false }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GridView,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (!isEpgView) Color.White else Color(0xFF94A3B8)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Grade de Canais",
+                            color = if (!isEpgView) Color.White else Color(0xFF94A3B8),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isEpgView) OrangePrimary else Color(0xFF1C2030),
+                    border = BorderStroke(1.dp, if (isEpgView) OrangePrimary else Color(0xFF2D3245)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .clickable { isEpgView = true }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isEpgView) Color.White else Color(0xFF94A3B8)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Guia EPG",
+                            color = if (isEpgView) Color.White else Color(0xFF94A3B8),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Channel count info header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${filtered.size} ${if (filtered.size == 1) "canal encontrado" else "canais disponíveis"}",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                if (selectedCategory != "Todos os canais" || searchQuery.isNotBlank()) {
+                    Text(
+                        text = "Limpar filtros",
+                        color = OrangePrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            selectedCategory = "Todos os canais"
+                            searchQuery = ""
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            if (filtered.isEmpty()) {
                 Box(
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = if (sortAlphabetically) "A-Z" else "Ordem",
-                        color = if (sortAlphabetically) Color.White else Color(0xFFB0B5C6),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        CategoryFilterRow(
-            categories = categories,
-            selectedCategory = selectedCategory,
-            onSelectCategory = { selectedCategory = it },
-            modifier = Modifier.padding(vertical = 2.dp)
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // View Mode Switcher (Grid vs EPG Guide)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = if (!isEpgView) OrangePrimary else Color(0xFF1C2030),
-                border = BorderStroke(1.dp, if (!isEpgView) OrangePrimary else Color(0xFF2D3245)),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(38.dp)
-                    .clickable { isEpgView = false }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.GridView,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (!isEpgView) Color.White else Color(0xFF94A3B8)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Grade de Canais",
-                        color = if (!isEpgView) Color.White else Color(0xFF94A3B8),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = if (isEpgView) OrangePrimary else Color(0xFF1C2030),
-                border = BorderStroke(1.dp, if (isEpgView) OrangePrimary else Color(0xFF2D3245)),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(38.dp)
-                    .clickable { isEpgView = true }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Schedule,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (isEpgView) Color.White else Color(0xFF94A3B8)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Guia EPG",
-                        color = if (isEpgView) Color.White else Color(0xFF94A3B8),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        // Channel count info header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "${filtered.size} ${if (filtered.size == 1) "canal encontrado" else "canais disponíveis"}",
-                color = Color(0xFF94A3B8),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
-            )
-            if (selectedCategory != "Todos" || searchQuery.isNotBlank()) {
-                Text(
-                    text = "Limpar filtros",
-                    color = OrangePrimary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable {
-                        selectedCategory = "Todos"
-                        searchQuery = ""
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.LiveTv,
+                            contentDescription = null,
+                            tint = Color(0xFF4A5568),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (searchQuery.isNotBlank() || selectedCategory != "Todos os canais") "Nenhum canal encontrado para esta busca." else "Nenhum canal de TV disponível.",
+                            color = Color(0xFFA0A5B5),
+                            fontSize = 13.sp
+                        )
                     }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        if (filtered.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.LiveTv,
-                        contentDescription = null,
-                        tint = Color(0xFF4A5568),
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (searchQuery.isNotBlank() || selectedCategory != "Todos") "Nenhum canal encontrado para esta busca." else "Nenhum canal de TV disponível.",
-                        color = Color(0xFFA0A5B5),
-                        fontSize = 13.sp
-                    )
                 }
-            }
-        } else if (isEpgView) {
-            EpgGuideView(channels = filtered, onPlay = onPlay)
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 150.dp),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(filtered, key = { it.id }) { channel ->
-                    val isFav = channel.isFavorite || favoriteIds.contains(channel.id)
-                    LiveChannelGridCard(
-                        channel = channel,
-                        isFavorite = isFav,
-                        onPlay = onPlay,
-                        onToggleFavorite = onToggleFavorite
-                    )
+            } else if (isEpgView) {
+                EpgGuideView(channels = filtered, onPlay = onPlay)
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 150.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(filtered, key = { it.id }) { channel ->
+                        val isFav = channel.isFavorite || favoriteIds.contains(channel.id)
+                        LiveChannelGridCard(
+                            channel = channel,
+                            isFavorite = isFav,
+                            onPlay = onPlay,
+                            onToggleFavorite = onToggleFavorite
+                        )
+                    }
                 }
             }
         }
