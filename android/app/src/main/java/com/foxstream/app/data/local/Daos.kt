@@ -83,7 +83,7 @@ interface HistoryDao {
     @Query("SELECT * FROM history ORDER BY playedAt DESC")
     suspend fun getAllHistory(): List<HistoryItem>
 
-    @Query("SELECT * FROM history WHERE isWatched = 0 AND type != 'LIVE' AND (playbackPosition > 3000 OR (duration > 0 AND (CAST(playbackPosition AS REAL) / duration) >= 0.005)) AND (duration = 0 OR (CAST(playbackPosition AS REAL) / duration) <= 0.95) ORDER BY playedAt DESC")
+    @Query("SELECT * FROM history WHERE isWatched = 0 AND type != 'LIVE' AND (playbackPosition >= 3000 OR (duration > 0 AND (CAST(playbackPosition AS REAL) / duration) >= 0.005)) AND (duration = 0 OR (CAST(playbackPosition AS REAL) / duration) < 0.95) ORDER BY playedAt DESC")
     suspend fun getContinueWatchingHistory(): List<HistoryItem>
 
     @Query("SELECT * FROM history WHERE streamUrl = :streamUrl LIMIT 1")

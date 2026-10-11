@@ -898,6 +898,55 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun recordPlaybackProgress(
+        streamUrl: String,
+        title: String,
+        type: ContentType,
+        position: Long,
+        duration: Long,
+        posterUrl: String? = null,
+        category: String? = null
+    ) {
+        if (streamUrl.contains("***")) return
+        // Regra dos Créditos / 95%: se assistiu 95% ou faltam menos de 3 min para vídeos longos, marca como assistido e exclui do Continue Assistindo
+        if (duration > 0L) {
+            val isCredits = (position >= duration * 0.95f) || (duration > 180_000L && (duration - position) <= 180_000L)
+            if (isCredits) {
+                markAsWatched(streamUrl, duration)
+                return
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = db.historyDao().getHistoryByStreamUrl(streamUrl)
+            val hist = existing?.copy(
+                title = if (existing.title.isNotBlank()) existing.title else title,
+                type = type,
+                playbackPosition = position,
+                duration = duration,
+                isWatched = false,
+                playedAt = System.currentTimeMillis(),
+                posterUrl = posterUrl ?: existing.posterUrl,
+                category = category ?: existing.category
+            ) ?: HistoryItem(
+                id = "hist_${System.currentTimeMillis()}",
+                contentId = streamUrl,
+                title = title,
+                type = type,
+                streamUrl = streamUrl,
+                posterUrl = posterUrl,
+                category = category,
+                playedAt = System.currentTimeMillis(),
+                playbackPosition = position,
+                duration = duration,
+                isWatched = false
+            )
+            db.historyDao().insertHistory(hist)
+            withContext(Dispatchers.Main) {
+                refreshHistory()
+            }
+        }
+    }
+
     fun updatePlaybackProgress(streamUrl: String, position: Long, duration: Long) {
         // Regra dos Créditos: 95% da duração ou menos de 3 minutos (180.000 ms) restantes para vídeos > 3 min
         if (duration > 0L) {
@@ -950,6 +999,7 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
                 db.historyDao().insertHistory(newHist)
             }
             withContext(Dispatchers.Main) {
+                continueWatching.removeAll { it.streamUrl == streamUrl }
                 refreshHistory()
             }
         }

@@ -187,6 +187,10 @@ fun PlayerScreen(
     var diagnosticLog by remember { mutableStateOf<String?>(null) }
     var initialSeekDone by remember { mutableStateOf(false) }
     var hasMarkedWatched by remember { mutableStateOf(false) }
+    var watchSecondsCount by remember(streamUrl) { mutableIntStateOf(0) }
+    var hasAddedToHistory by remember(streamUrl) { mutableStateOf(false) }
+    var lastValidPosition by remember(streamUrl) { mutableLongStateOf(initialPosition) }
+    var lastValidDuration by remember(streamUrl) { mutableLongStateOf(0L) }
     var autoPlayCancelled by remember { mutableStateOf(false) }
     var autoPlayTriggered by remember { mutableStateOf(false) }
     var nextEpisodeCountdown by remember { mutableIntStateOf(10) }
@@ -233,6 +237,10 @@ fun PlayerScreen(
             diagnosticLog = null
             initialSeekDone = false
             hasMarkedWatched = false
+            watchSecondsCount = 0
+            hasAddedToHistory = false
+            lastValidPosition = initialPosition
+            lastValidDuration = 0L
             autoPlayCancelled = false
             autoPlayTriggered = false
             nextEpisodeCountdown = 10
@@ -568,12 +576,12 @@ fun PlayerScreen(
 
         onDispose {
             if (contentType != ContentType.LIVE) {
-                val pos = if (useVlc) vlcMediaPlayer.time else exoPlayer.currentPosition.coerceAtLeast(0L)
-                val dur = if (useVlc) vlcMediaPlayer.length else exoPlayer.duration.coerceAtLeast(0L)
+                val pos = lastValidPosition
+                val dur = lastValidDuration
                 val isCredits = (dur > 0L) && ((pos >= dur * 0.95f) || (dur > 180_000L && (dur - pos) <= 180_000L))
                 if (hasMarkedWatched || isCredits) {
                     onMarkWatched()
-                } else {
+                } else if (hasAddedToHistory || watchSecondsCount >= 3 || pos >= 3000L) {
                     onProgressUpdate(pos, dur)
                 }
             }
@@ -588,22 +596,30 @@ fun PlayerScreen(
         LaunchedEffect(isPlaying, useVlc, streamUrl) {
             while (isActive && isPlaying) {
                 if (!userIsSeeking) {
-                    val pos = if (useVlc) vlcMediaPlayer.time else exoPlayer.currentPosition.coerceAtLeast(0L)
-                    val dur = if (useVlc) vlcMediaPlayer.length else exoPlayer.duration.coerceAtLeast(0L)
+                    val rawPos = if (useVlc) vlcMediaPlayer.time else exoPlayer.currentPosition.coerceAtLeast(0L)
+                    val rawDur = if (useVlc) vlcMediaPlayer.length else exoPlayer.duration.coerceAtLeast(0L)
+
+                    val pos = if (rawPos > 0L) rawPos else lastValidPosition
+                    val dur = if (rawDur > 0L) rawDur else lastValidDuration
+
                     currentPosition = pos
+                    lastValidPosition = pos
                     if (dur > 0L) {
                         duration = dur
+                        lastValidDuration = dur
                     }
 
                     // 1. Verificação adicional de Seek inicial seguro para VLC caso length já esteja disponível
                     if (useVlc && !initialSeekDone && initialPosition > 0L && dur > 0L) {
                         vlcMediaPlayer.time = initialPosition
                         currentPosition = initialPosition
+                        lastValidPosition = initialPosition
                         initialSeekDone = true
                     }
 
+                    watchSecondsCount += 1
+
                     // 2. Limpeza Automática do "Continuar Assistindo" marcando como assistido no histórico (Créditos / 95% da duração)
-                    // Regra dos Créditos: 95% da duração OU restarem menos de 3 minutos (180.000 ms)
                     val isCreditsReached = (dur > 0L) && (
                         (pos >= dur * 0.95f) || (dur > 180_000L && (dur - pos) <= 180_000L)
                     )
@@ -614,7 +630,11 @@ fun PlayerScreen(
                             onMarkWatched()
                         }
                     } else if (!hasMarkedWatched) {
-                        onProgressUpdate(pos, dur)
+                        // REQUISITO: Ao assistir por no mínimo 3 segundos a mídia será adicionada ao continue assistindo
+                        if (watchSecondsCount >= 3 || pos >= 3000L) {
+                            hasAddedToHistory = true
+                            onProgressUpdate(pos, dur)
+                        }
                     }
                 }
                 delay(1000)

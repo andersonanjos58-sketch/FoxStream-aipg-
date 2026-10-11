@@ -51,7 +51,9 @@ data class PlayingMedia(
     val type: ContentType,
     val initialPosition: Long = 0L,
     val seriesItem: SeriesItem? = null,
-    val currentEpisode: EpisodeItem? = null
+    val currentEpisode: EpisodeItem? = null,
+    val posterUrl: String? = null,
+    val category: String? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,7 +85,6 @@ fun FoxStreamApp(
     val playMedia: (String, String, ContentType, SeriesItem?, EpisodeItem?) -> Unit = { streamUrl, title, type, sItem, epItem ->
         val existingHist = viewModel.history.find { it.streamUrl == streamUrl }
         val savedPos = if (existingHist?.isWatched == true) 0L else (existingHist?.playbackPosition ?: 0L)
-        activePlayingMedia = PlayingMedia(streamUrl, title, type, savedPos, sItem, epItem)
 
         val seriesPoster = sItem?.posterUrl 
             ?: (if (type == ContentType.SERIES) seriesList.find { s -> s.seasons.any { se -> se.episodes.any { ep -> ep.streamUrl == streamUrl } } }?.posterUrl else null)
@@ -92,10 +93,13 @@ fun FoxStreamApp(
         val seriesCat = sItem?.category
             ?: (if (type == ContentType.SERIES) seriesList.find { s -> s.seasons.any { se -> se.episodes.any { ep -> ep.streamUrl == streamUrl } } }?.category else null)
 
-        viewModel.addPlaybackToHistory(
-            streamUrl = streamUrl,
+        activePlayingMedia = PlayingMedia(
+            url = streamUrl,
             title = title,
             type = type,
+            initialPosition = savedPos,
+            seriesItem = sItem,
+            currentEpisode = epItem,
             posterUrl = seriesPoster,
             category = seriesCat
         )
@@ -306,9 +310,22 @@ fun FoxStreamApp(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                val homeHistory = remember(continueWatching, history) {
-                    if (continueWatching.isNotEmpty()) continueWatching
-                    else history.filter { !it.isWatched && it.type != ContentType.LIVE && it.playbackPosition > 3000L }
+                val homeHistory = remember(continueWatching.toList(), history.toList()) {
+                    val rawList = if (continueWatching.isNotEmpty()) {
+                        continueWatching.toList()
+                    } else {
+                        history.filter {
+                            !it.isWatched &&
+                            it.type != ContentType.LIVE &&
+                            it.playbackPosition >= 3000L &&
+                            (it.duration == 0L || (it.playbackPosition.toFloat() / it.duration) < 0.95f)
+                        }
+                    }
+                    rawList.filter {
+                        !it.isWatched &&
+                        it.type != ContentType.LIVE &&
+                        (it.duration == 0L || (it.playbackPosition.toFloat() / it.duration) < 0.95f)
+                    }
                 }
 
                 if (showSearchScreen) {
@@ -598,7 +615,15 @@ fun FoxStreamApp(
                 isInPipMode = isInPipMode,
                 initialPosition = media.initialPosition,
                 onProgressUpdate = { pos, dur ->
-                    viewModel.updatePlaybackProgress(media.url, pos, dur)
+                    viewModel.recordPlaybackProgress(
+                        streamUrl = media.url,
+                        title = media.title,
+                        type = media.type,
+                        position = pos,
+                        duration = dur,
+                        posterUrl = media.posterUrl,
+                        category = media.category
+                    )
                 },
                 onMarkWatched = {
                     viewModel.markAsWatched(media.url)
