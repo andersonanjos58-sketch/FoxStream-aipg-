@@ -1341,7 +1341,6 @@ private fun maskCredentials(url: String): String {
     return url.replace(regex, "$1***/***/")
 }
 
-// Time formatter
 private fun formatTime(millis: Long): String {
     val totalSecs = millis / 1000
     val hours = totalSecs / 3600
@@ -1354,7 +1353,6 @@ private fun formatTime(millis: Long): String {
     }
 }
 
-// Opens VLC or displays external player picker
 private fun openInVlc(context: Context, streamUrl: String) {
     try {
         val uri = Uri.parse(streamUrl)
@@ -1366,7 +1364,6 @@ private fun openInVlc(context: Context, streamUrl: String) {
         }
         context.startActivity(vlcIntent)
     } catch (e: Exception) {
-        // Fallback: VLC not installed or custom error, open generic video chooser
         try {
             val uri = Uri.parse(streamUrl)
             val genericIntent = Intent(Intent.ACTION_VIEW).apply {
