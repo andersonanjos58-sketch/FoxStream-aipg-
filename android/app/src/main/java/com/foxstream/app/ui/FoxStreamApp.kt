@@ -391,6 +391,7 @@ fun FoxStreamApp(
                         )
                         AppNavTab.MOVIES -> MoviesScreen(
                             movies = movies,
+                            trendingMovies = viewModel.trendingMovies,
                             favorites = favorites,
                             onPlay = onPlayStream,
                             onOpenMovie = { movie ->
@@ -404,6 +405,7 @@ fun FoxStreamApp(
                         )
                         AppNavTab.SERIES -> SeriesScreen(
                             seriesList = seriesList,
+                            popularSeries = viewModel.popularSeries,
                             initialSeries = selectedSeriesForDetails,
                             onClearInitialSeries = { selectedSeriesForDetails = null },
                             history = history,

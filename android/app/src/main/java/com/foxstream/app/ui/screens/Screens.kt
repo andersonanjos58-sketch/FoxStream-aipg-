@@ -1650,6 +1650,7 @@ fun ChannelLogoPlaceholder(
 @Composable
 fun MoviesScreen(
     movies: List<MovieItem>,
+    trendingMovies: List<MovieItem> = emptyList(),
     onPlay: (String, String, ContentType) -> Unit,
     onOpenMovie: (MovieItem) -> Unit = {},
     onToggleFavorite: (MovieItem) -> Unit,
@@ -1681,23 +1682,24 @@ fun MoviesScreen(
         categoriesMap.keys.toList()
     }
 
-    // Destaques de Filmes (Carrossel Hero Banner)
-    val movieHeroItems = remember(movies) {
-        movies.filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
+    // Destaques de Filmes (Carrossel Hero Banner - 100% TMDb API)
+    val movieHeroItems = remember(trendingMovies, movies) {
+        val source = if (trendingMovies.isNotEmpty()) trendingMovies else movies
+        source.filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
             .take(8)
             .map { m ->
                 HeroBannerItem(
                     id = "movie_hero_${m.id}",
                     title = m.name,
                     imageUrl = m.backdropUrl ?: m.posterUrl ?: "",
-                    category = m.category,
+                    category = "Destaques TMDb",
                     type = ContentType.MOVIE,
                     streamUrl = m.streamUrl,
                     badgeInfo = listOfNotNull(
                         "FILME",
                         m.year,
                         m.rating?.let { "★ $it" },
-                        m.category.takeIf { it.isNotBlank() && it != "Filmes" }
+                        "TMDb"
                     ).joinToString(" • "),
                     overview = m.description,
                     year = m.year,
@@ -3076,6 +3078,7 @@ fun SeriesDetailView(
 @Composable
 fun SeriesScreen(
     seriesList: List<SeriesItem>,
+    popularSeries: List<SeriesItem> = emptyList(),
     onPlayEpisode: (SeriesItem, EpisodeItem) -> Unit,
     onLoadDetails: (SeriesItem, (List<SeasonItem>) -> Unit) -> Unit,
     initialSeries: SeriesItem? = null,
@@ -3125,24 +3128,25 @@ fun SeriesScreen(
         categoriesMap.keys.toList()
     }
 
-    // Destaques de Séries (Carrossel Hero Banner)
-    val seriesHeroItems = remember(seriesList) {
-        seriesList.filter { !it.posterUrl.isNullOrBlank() }
+    // Destaques de Séries (Carrossel Hero Banner - 100% TMDb API)
+    val seriesHeroItems = remember(popularSeries, seriesList) {
+        val source = if (popularSeries.isNotEmpty()) popularSeries else seriesList
+        source.filter { !it.posterUrl.isNullOrBlank() || !it.backdropUrl.isNullOrBlank() }
             .take(8)
             .map { s ->
                 val firstEpUrl = s.seasons.firstOrNull()?.episodes?.firstOrNull()?.streamUrl ?: ""
                 HeroBannerItem(
                     id = "series_hero_${s.id}",
                     title = s.name,
-                    imageUrl = s.posterUrl ?: "",
-                    category = s.category,
+                    imageUrl = s.backdropUrl ?: s.posterUrl ?: "",
+                    category = "Destaques TMDb",
                     type = ContentType.SERIES,
                     streamUrl = firstEpUrl,
                     badgeInfo = listOfNotNull(
                         "SÉRIE",
                         s.year,
                         s.rating?.let { "★ $it" },
-                        s.category.takeIf { it.isNotBlank() && it != "Séries" }
+                        "TMDb"
                     ).joinToString(" • "),
                     overview = s.description,
                     year = s.year,
