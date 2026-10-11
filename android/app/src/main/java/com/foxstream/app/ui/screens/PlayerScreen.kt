@@ -1333,6 +1333,7 @@ fun PlayerScreen(
             }
         }
     }
+}
 
 // Security: Masks credentials in streamUrl for visual display
 private fun maskCredentials(url: String): String {
