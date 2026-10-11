@@ -1404,6 +1404,11 @@ fun LiveTvScreen(
     var playerError by remember { mutableStateOf<String?>(null) }
     var retryTrigger by remember { mutableIntStateOf(0) }
     var showControls by remember { mutableStateOf(true) }
+    var isFullScreen by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = isFullScreen) {
+        isFullScreen = false
+    }
 
     // Keep active channel in sync if list loads after mount or returns from another tab
     LaunchedEffect(channels) {
@@ -1565,9 +1570,13 @@ fun LiveTvScreen(
     val nextActiveProgram = activeEpgPrograms.firstOrNull { !it.isLive && it != currentActiveProgram }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = if (isFullScreen) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        },
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // ==========================================
@@ -1575,21 +1584,29 @@ fun LiveTvScreen(
         // ==========================================
         if (activeChannel != null) {
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp)),
-                shape = RoundedCornerShape(16.dp),
+                modifier = if (isFullScreen) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                },
+                shape = if (isFullScreen) RectangleShape else RoundedCornerShape(16.dp),
                 color = Color(0xFF0F111A),
                 border = BorderStroke(1.dp, Color(0xFF23283B)),
                 tonalElevation = 6.dp
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxSize()) {
                     // Video View Box with Overlays
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 160.dp, max = 220.dp)
-                            .aspectRatio(16f / 9f)
+                        modifier = if (isFullScreen) {
+                            Modifier.fillMaxSize()
+                        } else {
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 160.dp, max = 220.dp)
+                                .aspectRatio(16f / 9f)
+                        }
                             .background(Color.Black)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
@@ -1898,9 +1915,7 @@ fun LiveTvScreen(
                                     border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
                                     modifier = Modifier
                                         .clickable {
-                                            activeChannel?.let { ch ->
-                                                onPlay(ch.streamUrl, ch.name, ContentType.LIVE)
-                                            }
+                                            isFullScreen = !isFullScreen
                                         }
                                 ) {
                                     Row(
@@ -1999,108 +2014,110 @@ fun LiveTvScreen(
         // ==========================================
         // 2. HEADER: TITLE & VIEW MODE SWITCH
         // ==========================================
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        if (!isFullScreen) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = OrangePrimary.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f)),
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.LiveTv,
-                            contentDescription = null,
-                            tint = OrangePrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-                Text(
-                    text = "Grade de Canais",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E2233)
-                ) {
-                    Text(
-                        text = "${filtered.size}",
-                        color = Color(0xFFA0A5B5),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
-                }
-            }
-
-            // View Mode Switcher
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (!isEpgView) OrangePrimary else Color(0xFF181B28),
-                    border = BorderStroke(0.5.dp, if (!isEpgView) OrangePrimary else Color(0xFF2B3045)),
-                    modifier = Modifier
-                        .height(30.dp)
-                        .clickable { isEpgView = false }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = OrangePrimary.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f)),
+                        modifier = Modifier.size(28.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.GridView,
-                            contentDescription = null,
-                            tint = if (!isEpgView) Color.White else Color(0xFFA0A5B5),
-                            modifier = Modifier.size(13.dp)
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.LiveTv,
+                                contentDescription = null,
+                                tint = OrangePrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Grade de Canais",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1E2233)
+                    ) {
                         Text(
-                            text = "Grade",
-                            color = if (!isEpgView) Color.White else Color(0xFFA0A5B5),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "${filtered.size}",
+                            color = Color(0xFFA0A5B5),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                         )
                     }
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isEpgView) OrangePrimary else Color(0xFF181B28),
-                    border = BorderStroke(0.5.dp, if (isEpgView) OrangePrimary else Color(0xFF2B3045)),
-                    modifier = Modifier
-                        .height(30.dp)
-                        .clickable { isEpgView = true }
+                // View Mode Switcher
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (!isEpgView) OrangePrimary else Color(0xFF181B28),
+                        border = BorderStroke(0.5.dp, if (!isEpgView) OrangePrimary else Color(0xFF2B3045)),
+                        modifier = Modifier
+                            .height(30.dp)
+                            .clickable { isEpgView = false }
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Schedule,
-                            contentDescription = null,
-                            tint = if (isEpgView) Color.White else Color(0xFFA0A5B5),
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = "Guia EPG",
-                            color = if (isEpgView) Color.White else Color(0xFFA0A5B5),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = null,
+                                tint = if (!isEpgView) Color.White else Color(0xFFA0A5B5),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Grade",
+                                color = if (!isEpgView) Color.White else Color(0xFFA0A5B5),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isEpgView) OrangePrimary else Color(0xFF181B28),
+                        border = BorderStroke(0.5.dp, if (isEpgView) OrangePrimary else Color(0xFF2B3045)),
+                        modifier = Modifier
+                            .height(30.dp)
+                            .clickable { isEpgView = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = if (isEpgView) Color.White else Color(0xFFA0A5B5),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Guia EPG",
+                                color = if (isEpgView) Color.White else Color(0xFFA0A5B5),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
