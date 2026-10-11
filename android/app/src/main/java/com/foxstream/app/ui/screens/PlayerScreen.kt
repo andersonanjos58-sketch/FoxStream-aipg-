@@ -746,12 +746,15 @@ fun PlayerScreen(
         )
 
         // Floating Video Scale Indicator overlay
-        AnimatedVisibility(
-            visible = scaleIndicatorText != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
+            AnimatedVisibility(
+                visible = scaleIndicatorText != null,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
             Surface(
                 color = Color.Black.copy(alpha = 0.8f),
                 shape = RoundedCornerShape(16.dp),
@@ -1234,27 +1237,30 @@ fun PlayerScreen(
         }
 
         // 3. Auto-Play e Botão de Próximo Episódio (Overlay flutuante com contagem regressiva para séries)
-        AnimatedVisibility(
-            visible = showNextEpisodeOverlay,
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
+        Box(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = if (showControls) 120.dp else 36.dp)
+                .fillMaxSize()
+                .padding(end = 24.dp, bottom = if (showControls) 120.dp else 36.dp),
+            contentAlignment = Alignment.BottomEnd
         ) {
-            Surface(
-                color = Color(0xFF141722).copy(alpha = 0.95f),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.2.dp, Color(0xFFFF9800).copy(alpha = 0.85f)),
-                shadowElevation = 10.dp,
-                modifier = Modifier.widthIn(min = 260.dp, max = 340.dp)
+            AnimatedVisibility(
+                visible = showNextEpisodeOverlay,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 }
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                Surface(
+                    color = Color(0xFF141722).copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.2.dp, Color(0xFFFF9800).copy(alpha = 0.85f)),
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.widthIn(min = 260.dp, max = 340.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.SkipNext,
