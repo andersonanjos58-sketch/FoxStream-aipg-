@@ -8,6 +8,7 @@ import Hls from 'hls.js';
 import { LiveChannel } from '../types';
 import { getChannelEpg, ChannelEpgInfo } from '../services/epgService';
 import { PlaybackService } from '../services/playbackService';
+import { StorageService } from '../services/storageService';
 
 interface LiveTvScreenProps {
   channels: LiveChannel[];
@@ -55,14 +56,23 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   // EPG Cache for channels (keyed by channel id)
   const [epgMap, setEpgMap] = useState<Map<string, ChannelEpgInfo>>(new Map());
 
-  // 1. Auto-play first channel upon entering Live TV page if none selected
+  // 1. Auto-play last watched channel upon entering Live TV page if none selected
   useEffect(() => {
     if (isActiveTab && channels && channels.length > 0) {
       if (!activeChannel) {
-        setActiveChannel(channels[0]);
+        const savedId = StorageService.getLastLiveChannelId();
+        const foundChannel = savedId ? channels.find(c => c.id === savedId) : null;
+        setActiveChannel(foundChannel || channels[0]);
       }
     }
   }, [isActiveTab, channels, activeChannel]);
+
+  // Keep last watched channel persisted whenever active channel changes
+  useEffect(() => {
+    if (activeChannel?.id) {
+      StorageService.setLastLiveChannelId(activeChannel.id);
+    }
+  }, [activeChannel?.id]);
 
   // Update EPG periodically (every 60 seconds)
   useEffect(() => {
@@ -365,6 +375,7 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   const handleSelectChannel = (channel: LiveChannel) => {
     if (activeChannel?.id === channel.id) return;
     setActiveChannel(channel);
+    StorageService.setLastLiveChannelId(channel.id);
     // Keeps user on the same page while the top player updates and plays!
   };
 
@@ -378,17 +389,18 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     : '';
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-4 py-4 pb-24 space-y-4">
+    <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 pb-24 space-y-4">
 
-      {/* TOP EMBEDDED PLAYER SECTION */}
+      {/* TOP EMBEDDED PLAYER SECTION - FIXED STICKY AT TOP */}
       {activeChannel && (
-        <div 
-          ref={playerContainerRef}
-          onMouseMove={triggerControlsActivity}
-          className="relative w-full rounded-2xl overflow-hidden bg-black border border-neutral-800 shadow-2xl transition-all group"
-        >
-          {/* Main Video Element */}
-          <div className="relative aspect-video max-h-[380px] sm:max-h-[440px] w-full flex items-center justify-center bg-neutral-950">
+        <div className="sticky top-[57px] z-30 pt-1 pb-2.5 bg-[#090a0f]/95 backdrop-blur-md -mx-3 px-3 sm:-mx-4 sm:px-4 border-b border-neutral-800/80 shadow-2xl transition-all">
+          <div 
+            ref={playerContainerRef}
+            onMouseMove={triggerControlsActivity}
+            className="relative w-full rounded-2xl overflow-hidden bg-black border border-neutral-800 shadow-2xl transition-all group mx-auto max-w-5xl"
+          >
+            {/* Main Video Element */}
+            <div className="relative aspect-video max-h-[220px] sm:max-h-[280px] md:max-h-[340px] w-full flex items-center justify-center bg-neutral-950">
             <video
               ref={videoRef}
               playsInline
@@ -611,6 +623,7 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
             </div>
           )}
         </div>
+      </div>
       )}
 
       {/* TOP HEADER WITH SLIM SEARCH (No "ordem" button, slim search bar) */}

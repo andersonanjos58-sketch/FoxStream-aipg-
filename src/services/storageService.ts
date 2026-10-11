@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   FAVORITES: 'foxstream_favorites_v1',
   HISTORY: 'foxstream_history_v1',
   CONTENT_CACHE_PREFIX: 'foxstream_content_',
+  LAST_LIVE_CHANNEL: 'foxstream_last_live_channel_v1',
 };
 
 /**
@@ -533,6 +534,27 @@ export class StorageService {
       safeStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
     } catch (err) {
       console.warn('Failed to remove history item:', err);
+    }
+  }
+
+  /**
+   * Last Watched Live Channel ID persistence
+   */
+  public static getLastLiveChannelId(): string | null {
+    try {
+      return safeStorage.getItem(STORAGE_KEYS.LAST_LIVE_CHANNEL);
+    } catch {
+      return null;
+    }
+  }
+
+  public static setLastLiveChannelId(channelId: string): void {
+    try {
+      if (channelId) {
+        safeStorage.setItem(STORAGE_KEYS.LAST_LIVE_CHANNEL, channelId);
+      }
+    } catch (err) {
+      console.warn('Failed to set last live channel id:', err);
     }
   }
 }

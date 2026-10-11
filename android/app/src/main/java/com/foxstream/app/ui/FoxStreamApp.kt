@@ -106,6 +106,13 @@ fun FoxStreamApp(
     }
 
     val onPlayStream: (String, String, ContentType) -> Unit = { streamUrl, title, type ->
+        if (type == ContentType.LIVE) {
+            val ch = channels.find { it.streamUrl == streamUrl || it.name.equals(title, ignoreCase = true) }
+            if (ch != null) {
+                val prefs = context.getSharedPreferences("foxstream_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().putString("last_live_channel_id", ch.id).apply()
+            }
+        }
         playMedia(streamUrl, title, type, null, null)
     }
 

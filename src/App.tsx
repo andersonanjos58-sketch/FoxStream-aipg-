@@ -187,6 +187,7 @@ export default function App() {
 
   // Play a Live Channel (Modal playback from Search/Favorites/Home)
   const handlePlayChannel = (channel: LiveChannel) => {
+    StorageService.setLastLiveChannelId(channel.id);
     const healedUrl = fixXtreamStreamUrl(channel.streamUrl);
 
     // Open Playback Dialog - History is recorded once watched for 3s in InternalPlayer
