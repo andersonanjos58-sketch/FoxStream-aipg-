@@ -58,6 +58,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.compose.ui.graphics.RectangleShape
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.Media
@@ -1483,6 +1484,7 @@ fun LiveTvScreen(
         if (!streamUrl.isNullOrBlank()) {
             isLoadingStream = true
             playerError = null
+            android.util.Log.d("FoxStreamDebug", "Tentando reproduzir: $streamUrl")
             try {
                 val cleanedUrl = streamUrl.trim().replace("\r", "").replace("\n", "").replace(" ", "%20")
                 val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
@@ -1494,11 +1496,13 @@ fun LiveTvScreen(
                 vlcMediaPlayer.media = media
                 media.release()
                 if (!isPaused) {
-                    vlcMediaPlayer.play()
+                    val result = vlcMediaPlayer.play()
+                    android.util.Log.d("FoxStreamDebug", "Resultado do play(): $result")
                     isPlaying = true
                 }
                 isLoadingStream = false
             } catch (e: Exception) {
+                android.util.Log.e("FoxStreamDebug", "Erro ao reproduzir: ${e.message}")
                 isLoadingStream = false
                 playerError = "Falha ao carregar URL do canal."
             }
