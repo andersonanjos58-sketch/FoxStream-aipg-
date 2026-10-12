@@ -1377,6 +1377,7 @@ fun SeriesHorizontalCarousel(
 // ==========================================
 // 2. LIVE TV SCREEN
 // ==========================================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveTvScreen(
     channels: List<LiveChannel>,
