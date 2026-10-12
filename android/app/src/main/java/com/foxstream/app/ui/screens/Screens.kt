@@ -2285,7 +2285,11 @@ fun LiveTvScreen(
                                             shape = RoundedCornerShape(6.dp),
                                             color = Color.Black.copy(alpha = 0.6f),
                                             border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
-                                            modifier = Modifier.clickable { isFullScreen = true }
+                                            modifier = Modifier.clickable {
+                                                activeChannel?.let { ch ->
+                                                    onPlay(ch.streamUrl, ch.name, ContentType.LIVE)
+                                                }
+                                            }
                                         ) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -2600,8 +2604,7 @@ fun LiveTvScreen(
                                 onSelect = { selectedCh ->
                                     userHasExplicitlySelectedChannel = true
                                     if (activeChannel?.id == selectedCh.id) {
-                                        // Tapping already active channel expands to full screen
-                                        isFullScreen = true
+                                        onPlay(selectedCh.streamUrl, selectedCh.name, ContentType.LIVE)
                                     } else {
                                         activeChannel = selectedCh
                                         prefs.edit().putString("last_live_channel_id", selectedCh.id).apply()

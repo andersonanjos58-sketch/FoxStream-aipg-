@@ -678,6 +678,9 @@ fun PlayerScreen(
             AndroidView(
                 factory = { ctx ->
                     VLCVideoLayout(ctx).apply {
+                        try {
+                            vlcMediaPlayer.detachViews()
+                        } catch (_: Exception) {}
                         vlcMediaPlayer.attachViews(this, null, true, true)
                         // Initial scale mode application
                         when (currentScaleIndex) {
@@ -693,6 +696,11 @@ fun PlayerScreen(
                                 vlcMediaPlayer.scale = 1.3f
                             }
                         }
+                        try {
+                            if (vlcMediaPlayer.media != null && !vlcMediaPlayer.isPlaying) {
+                                vlcMediaPlayer.play()
+                            }
+                        } catch (_: Exception) {}
                     }
                 },
                 update = { _ ->
