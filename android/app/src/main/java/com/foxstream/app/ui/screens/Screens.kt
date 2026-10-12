@@ -1,8 +1,14 @@
 package com.foxstream.app.ui.screens
 
+import android.app.Activity
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -1379,6 +1385,7 @@ fun LiveTvScreen(
     favorites: List<FavoriteItem> = emptyList()
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
     val prefs = remember(context) {
         context.getSharedPreferences("foxstream_prefs", Context.MODE_PRIVATE)
@@ -1389,7 +1396,10 @@ fun LiveTvScreen(
         prefs.getString("last_live_channel_id", null)
     }
 
-    // Embedded Player States - automatically initialize with last watched channel
+    // Flag tracking user explicit selection to avoid resetting to first channel on list refresh
+    var userHasExplicitlySelectedChannel by remember { mutableStateOf(false) }
+
+    // Active channel state: auto-selects first channel on first launch if available
     var activeChannel by remember {
         val initial = if (!lastSavedChannelId.isNullOrBlank()) {
             channels.find { it.id == lastSavedChannelId } ?: channels.firstOrNull()
@@ -1398,6 +1408,7 @@ fun LiveTvScreen(
         }
         mutableStateOf<LiveChannel?>(initial)
     }
+
     var isLoadingStream by remember { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(false) }
@@ -1407,34 +1418,74 @@ fun LiveTvScreen(
     var showControls by remember { mutableStateOf(true) }
     var isFullScreen by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = isFullScreen) {
-        isFullScreen = false
+    // Search and Category panel states
+    var isSearchExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var debouncedSearchQuery by remember { mutableStateOf("") }
+    var isCategorySheetOpen by remember { mutableStateOf(false) }
+
+    // System BackHandler: exits fullscreen first, closes search, closes category sheet
+    BackHandler(enabled = isFullScreen || isSearchExpanded || isCategorySheetOpen) {
+        when {
+            isFullScreen -> isFullScreen = false
+            isSearchExpanded -> {
+                isSearchExpanded = false
+                searchQuery = ""
+            }
+            isCategorySheetOpen -> isCategorySheetOpen = false
+        }
     }
 
-    // Keep active channel in sync if list loads after mount or returns from another tab
-    LaunchedEffect(channels) {
-        if (channels.isNotEmpty()) {
-            val savedId = prefs.getString("last_live_channel_id", null)
-            val restored = if (!savedId.isNullOrBlank()) {
-                channels.find { it.id == savedId }
-            } else null
-
-            if (activeChannel == null) {
-                activeChannel = restored ?: channels.firstOrNull()
-            } else if (restored != null && activeChannel?.id != restored.id && activeChannel == channels.firstOrNull()) {
-                activeChannel = restored
+    // Real Fullscreen Immersion & Landscape Orientation Management
+    DisposableEffect(isFullScreen, activity) {
+        val window = activity?.window
+        if (isFullScreen && window != null && activity != null) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+            try {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } catch (_: Exception) {}
+        }
+        onDispose {
+            if (window != null && activity != null) {
+                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                insetsController.show(WindowInsetsCompat.Type.systemBars())
+                try {
+                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                } catch (_: Exception) {}
             }
         }
     }
 
-    // Automatically persist last watched live channel whenever it changes
+    // Autoplay & Channel sync: Keeps active channel in sync safely without resetting user choice
+    LaunchedEffect(channels) {
+        if (channels.isNotEmpty()) {
+            if (activeChannel == null && !userHasExplicitlySelectedChannel) {
+                val savedId = prefs.getString("last_live_channel_id", null)
+                val restored = if (!savedId.isNullOrBlank()) {
+                    channels.find { it.id == savedId }
+                } else null
+                activeChannel = restored ?: channels.firstOrNull()
+            } else {
+                val currentId = activeChannel?.id
+                val refreshed = channels.find { it.id == currentId }
+                if (refreshed != null && refreshed != activeChannel) {
+                    activeChannel = refreshed
+                }
+            }
+        }
+    }
+
+    // Persist active channel id
     LaunchedEffect(activeChannel?.id) {
         activeChannel?.id?.let { id ->
             prefs.edit().putString("last_live_channel_id", id).apply()
         }
     }
 
-    // Dedicated LibVLC instance for embedded Live TV player
+    // Dedicated single LibVLC instance for embedded Live TV player
     val libVLC = remember(context) {
         val options = ArrayList<String>().apply {
             add("--http-reconnect")
@@ -1479,12 +1530,12 @@ fun LiveTvScreen(
         }
     }
 
+    // Playback state updates when activeChannel or retryTrigger changes
     LaunchedEffect(activeChannel?.streamUrl, retryTrigger) {
         val streamUrl = activeChannel?.streamUrl
         if (!streamUrl.isNullOrBlank()) {
             isLoadingStream = true
             playerError = null
-            android.util.Log.d("FoxStreamDebug", "Tentando reproduzir: $streamUrl")
             try {
                 val cleanedUrl = streamUrl.trim().replace("\r", "").replace("\n", "").replace(" ", "%20")
                 val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
@@ -1496,16 +1547,17 @@ fun LiveTvScreen(
                 vlcMediaPlayer.media = media
                 media.release()
                 if (!isPaused) {
-                    val result = vlcMediaPlayer.play()
-                    android.util.Log.d("FoxStreamDebug", "Resultado do play(): $result")
+                    vlcMediaPlayer.play()
                     isPlaying = true
                 }
                 isLoadingStream = false
             } catch (e: Exception) {
-                android.util.Log.e("FoxStreamDebug", "Erro ao reproduzir: ${e.message}")
                 isLoadingStream = false
-                playerError = "Falha ao carregar URL do canal."
+                playerError = "Falha ao conectar com o canal ao vivo."
             }
+        } else {
+            isLoadingStream = false
+            isPlaying = false
         }
     }
 
@@ -1513,6 +1565,7 @@ fun LiveTvScreen(
         vlcMediaPlayer.volume = if (isMuted) 0 else 100
     }
 
+    // Controls auto-hide timer in fullscreen or standard playback
     LaunchedEffect(showControls, isPlaying) {
         if (showControls && isPlaying) {
             delay(4000)
@@ -1520,14 +1573,9 @@ fun LiveTvScreen(
         }
     }
 
-    // Search & Filtering States
-    var searchQuery by remember { mutableStateOf("") }
-    var debouncedSearchQuery by remember { mutableStateOf("") }
-    var filtered by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
-    var isEpgView by remember { mutableStateOf(false) }
-
+    // Search query debouncing
     LaunchedEffect(searchQuery) {
-        delay(300)
+        delay(250)
         debouncedSearchQuery = searchQuery
     }
 
@@ -1546,8 +1594,11 @@ fun LiveTvScreen(
         list.addAll(baseCategories)
         list
     }
+
     var selectedCategory by remember { mutableStateOf("Todos os canais") }
 
+    // Channel filtering computation
+    var filtered by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
     LaunchedEffect(debouncedSearchQuery, selectedCategory, channels, favorites) {
         val result = withContext(Dispatchers.Default) {
             var list = when {
@@ -1566,199 +1617,520 @@ fun LiveTvScreen(
         filtered = result
     }
 
-    // Current active EPG programs
-    val activeEpgPrograms = remember(activeChannel?.id) {
-        activeChannel?.let { generateEpgPrograms(it) } ?: emptyList()
+    val isCurrentFav = remember(activeChannel?.id, favorites, channels) {
+        val ch = activeChannel
+        if (ch == null) false
+        else ch.isFavorite || favoriteIds.contains(ch.id)
     }
-    val currentActiveProgram = activeEpgPrograms.find { it.isLive } ?: activeEpgPrograms.firstOrNull()
-    val nextActiveProgram = activeEpgPrograms.firstOrNull { !it.isLive && it != currentActiveProgram }
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = if (isFullScreen) Arrangement.Top else Arrangement.spacedBy(10.dp)
+    // Root layout
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF090A0F))
     ) {
-        // ==========================================
-        // 1. TOP EMBEDDED PLAYER CONTAINER
-        // ==========================================
-        if (activeChannel != null) {
+        if (isFullScreen) {
+            // =========================================================================
+            // FULLSCREEN PLAYER (100% Immersive Screen, Landscape, zero margins or tabs)
+            // =========================================================================
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (!isFullScreen) Modifier.weight(0.3f) else Modifier.weight(1f))
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showControls = !showControls },
+                contentAlignment = Alignment.Center
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    shape = if (isFullScreen) RectangleShape else RoundedCornerShape(16.dp),
-                    color = Color(0xFF0F111A),
-                    border = BorderStroke(1.dp, Color(0xFF23283B)),
-                    tonalElevation = 6.dp
-                ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Video View Box with Overlays
-                    Box(
-                        modifier = if (isFullScreen) {
-                            Modifier.fillMaxSize()
-                        } else {
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 160.dp, max = 220.dp)
-                                .aspectRatio(16f / 9f)
+                // Real VLC Surface
+                AndroidView(
+                    factory = { ctx ->
+                        VLCVideoLayout(ctx).apply {
+                            vlcMediaPlayer.attachViews(this, null, true, true)
                         }
-                            .background(Color.Black)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { showControls = !showControls },
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Buffering State
+                if (isLoadingStream && playerError == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.5f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        AndroidView(
-                            factory = { ctx ->
-                                VLCVideoLayout(ctx).apply {
-                                    vlcMediaPlayer.attachViews(this, null, true, true)
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(36.dp),
+                                color = OrangePrimary,
+                                strokeWidth = 3.dp
+                            )
+                            Text(
+                                text = "Conectando ao canal...",
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
 
-                        // Buffering Overlay
-                        if (isLoadingStream && playerError == null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.55f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                // Error State
+                if (playerError != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.88f))
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFFFF5252),
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = playerError ?: "Sinal indisponível no momento",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(
+                                    onClick = { retryTrigger += 1 },
+                                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(32.dp),
-                                        color = OrangePrimary,
-                                        strokeWidth = 3.dp
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Reconectar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { isFullScreen = false },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
+                                ) {
+                                    Icon(Icons.Default.FullscreenExit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Sair da Tela Cheia", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fullscreen Overlays: Top Header
+                LivePlayerAnimatedVisibility(
+                    visible = showControls || !isPlaying,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Black.copy(alpha = 0.9f), Color.Transparent)
+                                )
+                            )
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            // Back / Exit Fullscreen button
+                            IconButton(
+                                onClick = { isFullScreen = false },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack,
+                                    contentDescription = "Voltar",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Channel Logo
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF141724),
+                                modifier = Modifier.size(width = 44.dp, height = 30.dp),
+                                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f))
+                            ) {
+                                if (activeChannel?.logoUrl.isNullOrBlank()) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = activeChannel?.name?.take(3)?.uppercase() ?: "TV",
+                                            color = OrangePrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                } else {
+                                    SubcomposeAsyncImage(
+                                        model = activeChannel?.logoUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().padding(2.dp),
+                                        contentScale = ContentScale.Fit
                                     )
+                                }
+                            }
+
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    // Live pill badge
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFEF4444)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(5.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.White)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "AO VIVO",
+                                                color = Color.White,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                    }
+
                                     Text(
-                                        text = "Conectando a ${activeChannel?.name}...",
-                                        color = Color.White.copy(alpha = 0.9f),
+                                        text = activeChannel?.name ?: "",
+                                        color = Color.White,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (!activeChannel?.category.isNullOrBlank()) {
+                                    Text(
+                                        text = activeChannel?.category ?: "",
+                                        color = Color(0xFF9CA3AF),
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                         }
 
-                        // Error Overlay
-                        if (playerError != null) {
-                            Box(
+                        // Right side action: Favorite toggle
+                        IconButton(
+                            onClick = { activeChannel?.let { onToggleFavorite(it) } },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = if (isCurrentFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "Favoritar",
+                                tint = if (isCurrentFav) OrangePrimary else Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Fullscreen Overlays: Bottom Controls
+                LivePlayerAnimatedVisibility(
+                    visible = showControls || !isPlaying,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                                )
+                            )
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            // Play/Pause
+                            Surface(
+                                shape = CircleShape,
+                                color = OrangePrimary,
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.85f))
-                                    .padding(16.dp),
-                                contentAlignment = Alignment.Center
+                                    .size(42.dp)
+                                    .clickable {
+                                        if (isPlaying) {
+                                            vlcMediaPlayer.pause()
+                                            isPaused = true
+                                            isPlaying = false
+                                        } else {
+                                            vlcMediaPlayer.play()
+                                            isPaused = false
+                                            isPlaying = true
+                                        }
+                                    }
                             ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (isPlaying) "Pausar" else "Reproduzir",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            // Reload
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.White.copy(alpha = 0.15f),
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clickable { retryTrigger += 1 }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Recarregar",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            // Mute
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.White.copy(alpha = 0.15f),
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clickable { isMuted = !isMuted }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                        contentDescription = "Áudio",
+                                        tint = if (isMuted) Color(0xFFFF5252) else Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Exit Fullscreen Button
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color.White.copy(alpha = 0.16f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                            modifier = Modifier.clickable { isFullScreen = false }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FullscreenExit,
+                                    contentDescription = "Sair da Tela Cheia",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Sair da Tela Cheia",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // =========================================================================
+            // STANDARD MODE: FIXED TOP PLAYER + INDEPENDENT SCROLLING CHANNEL LIST BELOW
+            // =========================================================================
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // FIXED TOP PLAYER
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0F111A))
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // 16:9 Video Canvas
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(Color.Black)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { showControls = !showControls },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (activeChannel != null) {
+                                AndroidView(
+                                    factory = { ctx ->
+                                        VLCVideoLayout(ctx).apply {
+                                            vlcMediaPlayer.attachViews(this, null, true, true)
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                // No Channel placeholder
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Warning,
+                                        imageVector = Icons.Default.Tv,
                                         contentDescription = null,
-                                        tint = Color(0xFFFF5252),
-                                        modifier = Modifier.size(28.dp)
+                                        tint = Color(0xFF4B5563),
+                                        modifier = Modifier.size(42.dp)
                                     )
                                     Text(
-                                        text = playerError ?: "Erro na transmissão",
-                                        color = Color.White,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        text = "Selecione um canal para assistir",
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 12.5.sp
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(
-                                            onClick = { retryTrigger += 1 },
-                                            colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp)
-                                        ) {
-                                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Tentar Novamente", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        Button(
-                                            onClick = {
-                                                isFullScreen = !isFullScreen
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2E40)),
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp)
-                                        ) {
-                                            Icon(Icons.Default.Fullscreen, contentDescription = null, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Tela Cheia", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            // Buffering Overlay
+                            if (isLoadingStream && playerError == null && activeChannel != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.5f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(30.dp),
+                                            color = OrangePrimary,
+                                            strokeWidth = 2.5.dp
+                                        )
+                                        Text(
+                                            text = "Carregando...",
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Error Overlay
+                            if (playerError != null && activeChannel != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.85f))
+                                        .padding(12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFF5252),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Text(
+                                            text = playerError ?: "Falha ao abrir canal",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(
+                                                onClick = { retryTrigger += 1 },
+                                                colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 3.dp),
+                                                modifier = Modifier.height(30.dp)
+                                            ) {
+                                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(13.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Tentar novamente", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        // Top Overlay (Channel Info, Live Badge & Favorite)
-                        LivePlayerAnimatedVisibility(
-                            visible = showControls || !isPlaying,
-                            modifier = Modifier.align(Alignment.TopCenter)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)
-                                        )
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.weight(1f)
+                            // Top Info Overlay
+                            if (activeChannel != null) {
+                                LivePlayerAnimatedVisibility(
+                                    visible = showControls || !isPlaying,
+                                    modifier = Modifier.align(Alignment.TopCenter)
                                 ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFF161926),
-                                        modifier = Modifier.size(width = 38.dp, height = 28.dp),
-                                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent)
+                                                )
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        if (activeChannel?.logoUrl.isNullOrBlank()) {
-                                            Icon(
-                                                imageVector = Icons.Default.LiveTv,
-                                                contentDescription = null,
-                                                tint = OrangePrimary,
-                                                modifier = Modifier.padding(4.dp)
-                                            )
-                                        } else {
-                                            AsyncImage(
-                                                model = activeChannel?.logoUrl,
-                                                contentDescription = null,
-                                                modifier = Modifier.fillMaxSize().padding(2.dp),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        }
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.weight(1f)
                                         ) {
                                             Surface(
                                                 shape = RoundedCornerShape(4.dp),
-                                                color = Color.Red.copy(alpha = 0.9f)
+                                                color = Color(0xFFEF4444)
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
@@ -1776,535 +2148,562 @@ fun LiveTvScreen(
                                                 }
                                             }
                                             Text(
-                                                text = activeChannel?.category ?: "",
-                                                color = Color(0xFFA0A5B5),
-                                                fontSize = 9.5.sp,
+                                                text = activeChannel?.name ?: "",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        Text(
-                                            text = activeChannel?.name ?: "",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+
+                                        IconButton(
+                                            onClick = { activeChannel?.let { onToggleFavorite(it) } },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isCurrentFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                                contentDescription = "Favoritar",
+                                                tint = if (isCurrentFav) OrangePrimary else Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Bottom Controls Overlay
+                                LivePlayerAnimatedVisibility(
+                                    visible = showControls || !isPlaying,
+                                    modifier = Modifier.align(Alignment.BottomCenter)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                                                )
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Play / Pause
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = OrangePrimary,
+                                                modifier = Modifier
+                                                    .size(30.dp)
+                                                    .clickable {
+                                                        if (isPlaying) {
+                                                            vlcMediaPlayer.pause()
+                                                            isPaused = true
+                                                            isPlaying = false
+                                                        } else {
+                                                            vlcMediaPlayer.play()
+                                                            isPaused = false
+                                                            isPlaying = true
+                                                        }
+                                                    }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Reload
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = Color.Black.copy(alpha = 0.5f),
+                                                modifier = Modifier
+                                                    .size(26.dp)
+                                                    .clickable { retryTrigger += 1 }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Refresh,
+                                                        contentDescription = "Recarregar",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Mute
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = Color.Black.copy(alpha = 0.5f),
+                                                modifier = Modifier
+                                                    .size(26.dp)
+                                                    .clickable { isMuted = !isMuted }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                                        contentDescription = "Áudio",
+                                                        tint = if (isMuted) Color(0xFFFF5252) else Color.White,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Fullscreen Button
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color.Black.copy(alpha = 0.6f),
+                                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                                            modifier = Modifier.clickable { isFullScreen = true }
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Fullscreen,
+                                                    contentDescription = "Tela Cheia",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                                Text(
+                                                    text = "Tela Cheia",
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Subtle bottom divider under player
+                        HorizontalDivider(
+                            color = Color(0xFF1E2233),
+                            thickness = 1.dp
+                        )
+                    }
+                }
+
+                // =========================================================================
+                // NAVIGATION BAR (Title, Count, Search Button, Category Button)
+                // =========================================================================
+                Surface(
+                    color = Color(0xFF0D0F17),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Section Header with active Category indicator
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(3.dp, 16.dp)
+                                        .clip(RoundedCornerShape(1.5.dp))
+                                        .background(OrangePrimary)
+                                )
+                                Text(
+                                    text = if (selectedCategory == "Todos os canais") "Canais ao Vivo" else selectedCategory,
+                                    color = Color.White,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF1A1D2B)
+                                ) {
+                                    Text(
+                                        text = "${filtered.size}",
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            // Right action buttons: Search & Category Filter
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Search toggle button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isSearchExpanded || searchQuery.isNotBlank()) OrangePrimary.copy(alpha = 0.2f) else Color(0xFF171A27),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSearchExpanded || searchQuery.isNotBlank()) OrangePrimary.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.08f)
+                                    ),
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clickable {
+                                            isSearchExpanded = !isSearchExpanded
+                                            if (!isSearchExpanded) searchQuery = ""
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
+                                            contentDescription = "Buscar canais",
+                                            tint = if (isSearchExpanded || searchQuery.isNotBlank()) OrangePrimary else Color(0xFFE5E7EB),
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                 }
 
+                                // Category selector button
                                 Surface(
-                                    shape = CircleShape,
-                                    color = Color.Black.copy(alpha = 0.6f),
-                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
+                                    shape = RoundedCornerShape(17.dp),
+                                    color = if (selectedCategory != "Todos os canais") OrangePrimary.copy(alpha = 0.18f) else Color(0xFF171A27),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (selectedCategory != "Todos os canais") OrangePrimary.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.08f)
+                                    ),
                                     modifier = Modifier
-                                        .size(30.dp)
-                                        .clickable {
-                                            activeChannel?.let { onToggleFavorite(it) }
-                                        }
+                                        .height(34.dp)
+                                        .clickable { isCategorySheetOpen = true }
                                 ) {
-                                    val isFav = activeChannel?.let { it.isFavorite || favoriteIds.contains(it.id) } ?: false
-                                    Box(contentAlignment = Alignment.Center) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
                                         Icon(
-                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                            contentDescription = "Favoritar",
-                                            tint = if (isFav) OrangePrimary else Color.White,
-                                            modifier = Modifier.size(16.dp)
+                                            imageVector = Icons.Default.FilterList,
+                                            contentDescription = "Categorias",
+                                            tint = if (selectedCategory != "Todos os canais") OrangePrimary else Color(0xFFE5E7EB),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = "Categorias",
+                                            color = if (selectedCategory != "Todos os canais") OrangePrimary else Color(0xFFE5E7EB),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
                                         )
                                     }
                                 }
                             }
                         }
 
-                        // Bottom Overlay (Controls: Play/Pause, Mute, Reload, Fullscreen)
-                        LivePlayerAnimatedVisibility(
-                            visible = showControls || !isPlaying,
-                            modifier = Modifier.align(Alignment.BottomCenter)
+                        // Smooth expandable search field
+                        AnimatedVisibility(
+                            visible = isSearchExpanded,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                            Column {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    placeholder = {
+                                        Text(
+                                            "Digite o nome do canal...",
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF9CA3AF)
                                         )
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    // Play/Pause button
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = OrangePrimary,
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clickable {
-                                                if (isPlaying) {
-                                                    vlcMediaPlayer.pause()
-                                                    isPaused = true
-                                                    isPlaying = false
-                                                } else {
-                                                    vlcMediaPlayer.play()
-                                                    isPaused = false
-                                                    isPlaying = true
-                                                }
-                                            }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-
-                                    // Reload button
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = Color.Black.copy(alpha = 0.5f),
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clickable { retryTrigger += 1 }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.Refresh,
-                                                contentDescription = "Recarregar",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-
-                                    // Mute button
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = Color.Black.copy(alpha = 0.5f),
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clickable { isMuted = !isMuted }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                                                contentDescription = "Áudio",
-                                                tint = if (isMuted) Color(0xFFFF5252) else Color.White,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Fullscreen button
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color.Black.copy(alpha = 0.6f),
-                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
-                                    modifier = Modifier
-                                        .clickable {
-                                            isFullScreen = !isFullScreen
-                                        }
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
+                                    },
+                                    leadingIcon = {
                                         Icon(
-                                            imageVector = Icons.Default.Fullscreen,
-                                            contentDescription = "Tela Cheia",
-                                            tint = Color.White,
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = null,
+                                            tint = OrangePrimary,
                                             modifier = Modifier.size(16.dp)
                                         )
-                                        Text(
-                                            text = "Tela Cheia",
-                                            color = Color.White,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
+                                    },
+                                    trailingIcon = {
+                                        if (searchQuery.isNotEmpty()) {
+                                            IconButton(
+                                                onClick = { searchQuery = "" },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Limpar busca",
+                                                    tint = Color(0xFF9CA3AF),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = OrangePrimary,
+                                        unfocusedBorderColor = Color(0xFF252A3C),
+                                        focusedContainerColor = Color(0xFF141724),
+                                        unfocusedContainerColor = Color(0xFF141724),
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    )
+                                )
                             }
                         }
                     }
+                }
 
-                    // EPG Mini Bar under Video
-                    if (currentActiveProgram != null && !isFullScreen) {
-                        Surface(
-                            color = Color(0xFF141724),
-                            modifier = Modifier.fillMaxWidth()
+                // =========================================================================
+                // INDEPENDENT SCROLLING CHANNELS LIST (Content Area)
+                // =========================================================================
+                if (channels.isEmpty()) {
+                    // Empty list state
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(24.dp)
                         ) {
-                            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.Tv,
+                                contentDescription = null,
+                                tint = Color(0xFF4B5563),
+                                modifier = Modifier.size(46.dp)
+                            )
+                            Text(
+                                text = "Nenhum canal disponível na lista",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Adicione ou atualize sua lista de IPTV nas configurações.",
+                                color = Color(0xFF9CA3AF),
+                                fontSize = 11.5.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                } else if (filtered.isEmpty()) {
+                    // No search / filter results
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SearchOff,
+                                contentDescription = null,
+                                tint = Color(0xFF4B5563),
+                                modifier = Modifier.size(42.dp)
+                            )
+                            Text(
+                                text = "Nenhum canal encontrado",
+                                color = Color.White,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (searchQuery.isNotBlank())
+                                    "Nenhum resultado para "$searchQuery"."
+                                else
+                                    "Nenhum canal nesta categoria.",
+                                color = Color(0xFF9CA3AF),
+                                fontSize = 11.5.sp
+                            )
+                            Button(
+                                onClick = {
+                                    searchQuery = ""
+                                    isSearchExpanded = false
+                                    selectedCategory = "Todos os canais"
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("Redefinir Filtros", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    // Premium Channels Grid
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 150.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 28.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(filtered, key = { it.id }) { channel ->
+                            val isFav = channel.isFavorite || favoriteIds.contains(channel.id)
+                            val isCurrent = activeChannel?.id == channel.id
+                            LiveChannelGridCard(
+                                channel = channel,
+                                isFavorite = isFav,
+                                isSelected = isCurrent,
+                                onPlay = onPlay,
+                                onSelect = { selectedCh ->
+                                    userHasExplicitlySelectedChannel = true
+                                    if (activeChannel?.id == selectedCh.id) {
+                                        // Tapping already active channel expands to full screen
+                                        isFullScreen = true
+                                    } else {
+                                        activeChannel = selectedCh
+                                        prefs.edit().putString("last_live_channel_id", selectedCh.id).apply()
+                                    }
+                                },
+                                onToggleFavorite = onToggleFavorite
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // CATEGORIES MODAL BOTTOM SHEET
+        // =========================================================================
+        if (isCategorySheetOpen) {
+            ModalBottomSheet(
+                onDismissRequest = { isCategorySheetOpen = false },
+                containerColor = Color(0xFF10131F),
+                contentColor = Color.White,
+                scrimColor = Color.Black.copy(alpha = 0.65f),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .padding(bottom = 32.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Category,
+                                contentDescription = null,
+                                tint = OrangePrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Filtrar por Categoria",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(onClick = { isCategorySheetOpen = false }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Fechar",
+                                tint = Color(0xFF9CA3AF),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(categories) { cat ->
+                            val isSelected = cat == selectedCategory
+                            val count = when {
+                                cat == "Todos os canais" || cat == "Todos" -> channels.size
+                                cat == "❤️ Favoritos" -> channels.count { it.isFavorite || favoriteIds.contains(it.id) }
+                                else -> channels.count { it.category.equals(cat, ignoreCase = true) }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) OrangePrimary.copy(alpha = 0.16f) else Color(0xFF161928),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.05f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedCategory = cat
+                                        isCategorySheetOpen = false
+                                    }
+                            ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                        modifier = Modifier.weight(1f)
+                                    Text(
+                                        text = cat,
+                                        color = if (isSelected) OrangePrimary else Color.White,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) OrangePrimary.copy(alpha = 0.25f) else Color(0xFF0F121E)
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(5.dp)
-                                                .clip(CircleShape)
-                                                .background(OrangePrimary)
-                                        )
                                         Text(
-                                            text = "Agora: ${currentActiveProgram.title}",
-                                            color = Color.White,
+                                            text = "$count",
+                                            color = if (isSelected) OrangePrimary else Color(0xFF9CA3AF),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                         )
                                     }
-                                    Text(
-                                        text = "${currentActiveProgram.startTime} - ${currentActiveProgram.endTime}",
-                                        color = Color(0xFFA0A5B5),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                if (currentActiveProgram.progressPercent > 0f) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    LinearProgressIndicator(
-                                        progress = { currentActiveProgram.progressPercent },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(3.dp)
-                                            .clip(RoundedCornerShape(2.dp)),
-                                        color = OrangePrimary,
-                                        trackColor = Color(0xFF23283B)
-                                    )
-                                }
-
-                                if (nextActiveProgram != null) {
-                                    Spacer(modifier = Modifier.height(3.dp))
-                                    Text(
-                                        text = "A seguir: ${nextActiveProgram.title} (${nextActiveProgram.startTime})",
-                                        color = Color(0xFF8E95A8),
-                                        fontSize = 9.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
                                 }
                             }
                         }
                     }
-                }
-            }
-        }
-
-        // ==========================================
-        // 2. HEADER: TITLE & VIEW MODE SWITCH
-        // ==========================================
-        if (!isFullScreen) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = OrangePrimary.copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.35f)),
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.LiveTv,
-                                contentDescription = null,
-                                tint = OrangePrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = "Grade de Canais",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF1E2233)
-                    ) {
-                        Text(
-                            text = "${filtered.size}",
-                            color = Color(0xFFA0A5B5),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                // View Mode Switcher
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (!isEpgView) OrangePrimary else Color(0xFF181B28),
-                        border = BorderStroke(0.5.dp, if (!isEpgView) OrangePrimary else Color(0xFF2B3045)),
-                        modifier = Modifier
-                            .height(30.dp)
-                            .clickable { isEpgView = false }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.GridView,
-                                contentDescription = null,
-                                tint = if (!isEpgView) Color.White else Color(0xFFA0A5B5),
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = "Grade",
-                                color = if (!isEpgView) Color.White else Color(0xFFA0A5B5),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isEpgView) OrangePrimary else Color(0xFF181B28),
-                        border = BorderStroke(0.5.dp, if (isEpgView) OrangePrimary else Color(0xFF2B3045)),
-                        modifier = Modifier
-                            .height(30.dp)
-                            .clickable { isEpgView = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Schedule,
-                                contentDescription = null,
-                                tint = if (isEpgView) Color.White else Color(0xFFA0A5B5),
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = "Guia EPG",
-                                color = if (isEpgView) Color.White else Color(0xFFA0A5B5),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 3. SEARCH BAR
-        // ==========================================
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar canal ou categoria...", fontSize = 12.sp, color = Color(0xFF8E95A8)) },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = null,
-                    tint = OrangePrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Limpar busca",
-                            tint = Color.Gray,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            singleLine = true,
-            shape = RoundedCornerShape(10.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = OrangePrimary,
-                unfocusedBorderColor = Color(0xFF252A3B),
-                focusedContainerColor = Color(0xFF141724),
-                unfocusedContainerColor = Color(0xFF141724),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
-            )
-        )
-
-        // ==========================================
-        // 4. HORIZONTAL CATEGORY PILLS
-        // ==========================================
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            contentPadding = PaddingValues(vertical = 2.dp)
-        ) {
-            items(categories) { cat ->
-                val isSelected = cat == selectedCategory
-                val count = when {
-                    cat == "Todos os canais" || cat == "Todos" -> channels.size
-                    cat == "❤️ Favoritos" -> channels.count { it.isFavorite || favoriteIds.contains(it.id) }
-                    else -> channels.count { it.category.equals(cat, ignoreCase = true) }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) OrangePrimary else Color(0xFF161926),
-                    border = BorderStroke(
-                        0.5.dp,
-                        if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.08f)
-                    ),
-                    modifier = Modifier.clickable { selectedCategory = cat }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Text(
-                            text = cat,
-                            color = if (isSelected) Color.White else Color(0xFFB0B5C6),
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (isSelected) Color.Black.copy(alpha = 0.25f) else Color(0xFF0F121C)
-                        ) {
-                            Text(
-                                text = "$count",
-                                color = if (isSelected) Color.White else Color(0xFF7E869B),
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 5. MAIN CONTENT AREA
-        // ==========================================
-        if (filtered.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.LiveTv,
-                        contentDescription = null,
-                        tint = Color(0xFF4A5568),
-                        modifier = Modifier.size(46.dp)
-                    )
-                    Text(
-                        text = if (searchQuery.isNotBlank() || selectedCategory != "Todos os canais") {
-                            "Nenhum canal encontrado para estes filtros."
-                        } else {
-                            "Nenhum canal de TV disponível."
-                        },
-                        color = Color(0xFFA0A5B5),
-                        fontSize = 13.sp
-                    )
-                    if (searchQuery.isNotBlank() || selectedCategory != "Todos os canais") {
-                        Button(
-                            onClick = {
-                                searchQuery = ""
-                                selectedCategory = "Todos os canais"
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Text("Limpar Filtros", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        } else if (isEpgView) {
-            Box(modifier = Modifier.weight(1f)) {
-                EpgGuideView(
-                    channels = filtered,
-                    onPlay = { url, name, type ->
-                        val matchingChannel = filtered.find { it.streamUrl == url }
-                        if (matchingChannel != null) {
-                            activeChannel = matchingChannel
-                            prefs.edit().putString("last_live_channel_id", matchingChannel.id).apply()
-                        } else {
-                            onPlay(url, name, type)
-                        }
-                    }
-                )
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 145.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(filtered, key = { it.id }) { channel ->
-                    val isFav = channel.isFavorite || favoriteIds.contains(channel.id)
-                    val isCurrent = activeChannel?.id == channel.id
-                    LiveChannelGridCard(
-                        channel = channel,
-                        isFavorite = isFav,
-                        isSelected = isCurrent,
-                        onPlay = onPlay,
-                        onSelect = { selectedCh ->
-                            if (activeChannel?.id == selectedCh.id) {
-                                isFullScreen = true
-                            } else {
-                                activeChannel = selectedCh
-                                prefs.edit().putString("last_live_channel_id", selectedCh.id).apply()
-                            }
-                        },
-                        onToggleFavorite = onToggleFavorite
-                    )
                 }
             }
         }
     }
-}
 }
 
 private fun generateEpgPrograms(channel: LiveChannel): List<EpgProgram> {
@@ -2634,9 +3033,6 @@ fun LiveChannelGridCard(
     onSelect: ((LiveChannel) -> Unit)? = null,
     onToggleFavorite: (LiveChannel) -> Unit
 ) {
-    val programs = remember(channel.id) { generateEpgPrograms(channel) }
-    val currentProg = programs.find { it.isLive } ?: programs.firstOrNull()
-
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -2649,19 +3045,20 @@ fun LiveChannelGridCard(
                 }
             },
         shape = RoundedCornerShape(12.dp),
-        color = if (isSelected) Color(0xFF1E1712) else Color(0xFF161926),
+        color = if (isSelected) Color(0xFF1E1712) else Color(0xFF131622),
         border = BorderStroke(
             if (isSelected) 1.5.dp else 1.dp,
-            if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.09f)
+            if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.07f)
         ),
-        tonalElevation = if (isSelected) 6.dp else 3.dp
+        tonalElevation = if (isSelected) 4.dp else 1.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // Container superior da logo do canal
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(110.dp),
+                    .height(96.dp)
+                    .background(Color(0xFF0F111A)),
                 contentAlignment = Alignment.Center
             ) {
                 if (channel.logoUrl.isNullOrBlank()) {
@@ -2675,7 +3072,8 @@ fun LiveChannelGridCard(
                         contentDescription = channel.name,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp),
+                            .height(96.dp)
+                            .padding(8.dp),
                         contentScale = ContentScale.Fit,
                         loading = {
                             Box(
@@ -2683,7 +3081,7 @@ fun LiveChannelGridCard(
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(18.dp),
                                     color = OrangePrimary.copy(alpha = 0.6f),
                                     strokeWidth = 2.dp
                                 )
@@ -2702,7 +3100,7 @@ fun LiveChannelGridCard(
                 if (isSelected) {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = Color.Black.copy(alpha = 0.65f),
+                        color = Color.Black.copy(alpha = 0.75f),
                         border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.8f)),
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -2715,25 +3113,25 @@ fun LiveChannelGridCard(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(width = 3.dp, height = 12.dp)
-                                    .clip(RoundedCornerShape(1.dp))
-                                    .background(OrangePrimary)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 3.dp, height = 16.dp)
-                                    .clip(RoundedCornerShape(1.dp))
-                                    .background(OrangePrimary)
-                            )
-                            Box(
-                                modifier = Modifier
                                     .size(width = 3.dp, height = 10.dp)
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(OrangePrimary)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 3.dp, height = 14.dp)
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(OrangePrimary)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 3.dp, height = 8.dp)
                                     .clip(RoundedCornerShape(1.dp))
                                     .background(OrangePrimary)
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "TOCANDO",
+                                text = "NO AR",
                                 color = OrangePrimary,
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Black
@@ -2742,43 +3140,15 @@ fun LiveChannelGridCard(
                     }
                 }
 
-                // Badge AO VIVO no canto superior esquerdo
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = Color.Red.copy(alpha = 0.85f),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(5.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = "AO VIVO",
-                            color = Color.White,
-                            fontSize = 8.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                // Botão de favorito circular translúcido no canto superior direito
+                // Botão de favorito no canto superior direito
                 Surface(
                     shape = CircleShape,
-                    color = Color.Black.copy(alpha = 0.65f),
-                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                    color = Color.Black.copy(alpha = 0.6f),
+                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .size(28.dp)
+                        .padding(5.dp)
+                        .size(26.dp)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
@@ -2788,8 +3158,8 @@ fun LiveChannelGridCard(
                         Icon(
                             imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = if (isFavorite) "Remover dos favoritos" else "Adicionar aos favoritos",
-                            tint = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.85f),
-                            modifier = Modifier.size(15.dp)
+                            tint = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
@@ -2804,85 +3174,28 @@ fun LiveChannelGridCard(
                 Text(
                     text = channel.name,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp,
-                    lineHeight = 16.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 15.sp,
                     color = if (isSelected) OrangePrimary else Color.White,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 if (channel.category.isNotBlank()) {
                     Spacer(modifier = Modifier.height(3.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(5.dp)
-                                .clip(CircleShape)
-                                .background(OrangePrimary)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = channel.category,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFFA0A5B5),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                // Programa atual do Guia EPG com barra de progresso
-                if (currentProg != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF0F121C))
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = currentProg.title,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isSelected) OrangePrimary else Color(0xFFCCD2E3),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = currentProg.startTime,
-                                fontSize = 8.5.sp,
-                                color = Color(0xFF8E95A8)
-                            )
-                        }
-                        if (currentProg.progressPercent > 0f) {
-                            Spacer(modifier = Modifier.height(3.dp))
-                            LinearProgressIndicator(
-                                progress = { currentProg.progressPercent },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(2.5.dp)
-                                    .clip(RoundedCornerShape(2.dp)),
-                                color = OrangePrimary,
-                                trackColor = Color(0xFF23283B)
-                            )
-                        }
-                    }
+                    Text(
+                        text = channel.category,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF9CA3AF),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
     }
 }
+
 
 @Composable
 fun ChannelLogoPlaceholder(
