@@ -780,6 +780,7 @@ fun PlayerScreen(
                 }
             }
         }
+        }
 
         // Picture in Picture mode overrides controls completely
         if (!isInPipMode) {
