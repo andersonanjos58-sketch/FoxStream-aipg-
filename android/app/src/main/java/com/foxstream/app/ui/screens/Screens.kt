@@ -2534,7 +2534,7 @@ fun LiveTvScreen(
                             )
                             Text(
                                 text = if (searchQuery.isNotBlank())
-                                    "Nenhum resultado para "$searchQuery"."
+                                    "Nenhum resultado para \"$searchQuery\"."
                                 else
                                     "Nenhum canal nesta categoria.",
                                 color = Color(0xFF9CA3AF),
