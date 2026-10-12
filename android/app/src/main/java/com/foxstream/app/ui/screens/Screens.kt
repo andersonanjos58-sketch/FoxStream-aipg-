@@ -1539,6 +1539,13 @@ fun LiveTvScreen(
             playerError = null
             try {
                 val cleanedUrl = streamUrl.trim().replace("\r", "").replace("\n", "").replace(" ", "%20")
+                try {
+                    vlcMediaPlayer.stop()
+                } catch (_: Exception) {}
+                try {
+                    vlcMediaPlayer.detachViews()
+                } catch (_: Exception) {}
+
                 val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
                     addOption(":http-user-agent=VLC/3.0.18 LibVLC/3.0.18")
                     addOption(":http-referrer=")
@@ -1648,7 +1655,17 @@ fun LiveTvScreen(
                 AndroidView(
                     factory = { ctx ->
                         VLCVideoLayout(ctx).apply {
-                            vlcMediaPlayer.attachViews(this, null, true, true)
+                            try {
+                                vlcMediaPlayer.detachViews()
+                            } catch (_: Exception) {}
+                            try {
+                                try {
+                                vlcMediaPlayer.detachViews()
+                            } catch (_: Exception) {}
+                            try {
+                                vlcMediaPlayer.attachViews(this, null, true, true)
+                            } catch (_: Exception) {}
+                            } catch (_: Exception) {}
                         }
                     },
                     modifier = Modifier.fillMaxSize()
@@ -2008,7 +2025,12 @@ fun LiveTvScreen(
                                 AndroidView(
                                     factory = { ctx ->
                                         VLCVideoLayout(ctx).apply {
-                                            vlcMediaPlayer.attachViews(this, null, true, true)
+                                            try {
+                                vlcMediaPlayer.detachViews()
+                            } catch (_: Exception) {}
+                            try {
+                                vlcMediaPlayer.attachViews(this, null, true, true)
+                            } catch (_: Exception) {}
                                         }
                                     },
                                     modifier = Modifier.fillMaxSize()
