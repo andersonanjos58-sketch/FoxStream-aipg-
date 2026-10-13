@@ -69,6 +69,9 @@ import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.util.VLCVideoLayout
+import org.videolan.libvlc.interfaces.IVLCVout
+import android.view.ViewGroup
+import androidx.compose.ui.zIndex
 import android.net.Uri
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
@@ -1375,15 +1378,57 @@ fun SeriesHorizontalCarousel(
 }
 
 // ==========================================
-// 2. LIVE TV SCREEN
 // ==========================================
+// 2. LIVE TV SCREEN (REFACTORED WITH ROBUST LIBVLC ENGINE)
+// ==========================================
+private fun applyVlcScaleMode(
+    player: MediaPlayer,
+    scaleIndex: Int,
+    layoutWidth: Int = 0,
+    layoutHeight: Int = 0
+) {
+    try {
+        when (scaleIndex) {
+            0 -> {
+                // Ajustar (Proporcional original com letterbox se necessário)
+                player.aspectRatio = null
+                player.scale = 0f
+            }
+            1 -> {
+                // 16:9 Widescreen
+                player.aspectRatio = "16:9"
+                player.scale = 0f
+            }
+            2 -> {
+                // Zoom (Preenchimento 100% sem barras pretas)
+                player.aspectRatio = null
+                player.scale = 1.35f
+            }
+            3 -> {
+                // Esticar (100% área total da tela / matching viewport)
+                if (layoutWidth > 0 && layoutHeight > 0) {
+                    player.aspectRatio = "$layoutWidth:$layoutHeight"
+                } else {
+                    player.aspectRatio = null
+                }
+                player.scale = 0f
+            }
+            else -> {
+                player.aspectRatio = null
+                player.scale = 0f
+            }
+        }
+    } catch (_: Exception) {}
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveTvScreen(
     channels: List<LiveChannel>,
     onPlay: (String, String, ContentType) -> Unit,
     onToggleFavorite: (LiveChannel) -> Unit,
-    favorites: List<FavoriteItem> = emptyList()
+    favorites: List<FavoriteItem> = emptyList(),
+    onFullScreenChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -1419,11 +1464,24 @@ fun LiveTvScreen(
     var showControls by remember { mutableStateOf(true) }
     var isFullScreen by remember { mutableStateOf(false) }
 
+    // Proporção de tela e escala VLC (0: Ajustar, 1: 16:9, 2: Zoom, 3: Esticar)
+    var currentScaleIndex by remember { mutableIntStateOf(0) }
+    val scaleModeNames = remember { listOf("Ajustar", "16:9", "Zoom", "Esticar") }
+
+    // Sincronização segura da surface LibVLC
+    var shouldPlayWhenReady by remember { mutableStateOf(false) }
+    var isSurfaceReady by remember { mutableStateOf(false) }
+
     // Search and Category panel states
     var isSearchExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var debouncedSearchQuery by remember { mutableStateOf("") }
     var isCategorySheetOpen by remember { mutableStateOf(false) }
+
+    // Propagate fullscreen state to FoxStreamApp scaffold (hides TopBar & BottomBar)
+    LaunchedEffect(isFullScreen) {
+        onFullScreenChange(isFullScreen)
+    }
 
     // System BackHandler: exits fullscreen first, closes search, closes category sheet
     BackHandler(enabled = isFullScreen || isSearchExpanded || isCategorySheetOpen) {
@@ -1486,11 +1544,18 @@ fun LiveTvScreen(
         }
     }
 
-    // Dedicated single LibVLC instance for embedded Live TV player
+    // Dedicated single LibVLC instance for embedded Live TV player with hardware decoding options
     val libVLC = remember(context) {
         val options = ArrayList<String>().apply {
             add("--http-reconnect")
-            add("--network-caching=5000")
+            add("--network-caching=3000")
+            add("--live-caching=3000")
+            add("--file-caching=3000")
+            add("--clock-jitter=0")
+            add("--clock-synchro=0")
+            add("--drop-late-frames")
+            add("--skip-frames")
+            add("--codec=mediacodec,iomx,all")
             add("-vvv")
         }
         val instance = LibVLC(context, options)
@@ -1502,24 +1567,80 @@ fun LiveTvScreen(
         MediaPlayer(libVLC)
     }
 
+    // Safe memory release on screen disposal
     DisposableEffect(libVLC, vlcMediaPlayer) {
         onDispose {
-            vlcMediaPlayer.stop()
-            vlcMediaPlayer.detachViews()
-            vlcMediaPlayer.release()
-            libVLC.release()
+            try {
+                vlcMediaPlayer.stop()
+            } catch (_: Exception) {}
+            try {
+                if (vlcMediaPlayer.vlcVout.areViewsAttached()) {
+                    vlcMediaPlayer.detachViews()
+                }
+            } catch (_: Exception) {}
+            try {
+                vlcMediaPlayer.release()
+            } catch (_: Exception) {}
+            try {
+                libVLC.release()
+            } catch (_: Exception) {}
         }
     }
 
+    // VLC Event listener for robust status tracking
+    DisposableEffect(vlcMediaPlayer) {
+        val listener = MediaPlayer.EventListener { event ->
+            when (event.type) {
+                MediaPlayer.Event.Playing -> {
+                    isPlaying = true
+                    isLoadingStream = false
+                    playerError = null
+                }
+                MediaPlayer.Event.Paused -> {
+                    isPlaying = false
+                }
+                MediaPlayer.Event.Stopped -> {
+                    isPlaying = false
+                }
+                MediaPlayer.Event.Buffering -> {
+                    if (event.buffering >= 100f) {
+                        isLoadingStream = false
+                    }
+                }
+                MediaPlayer.Event.EncounteredError -> {
+                    isLoadingStream = false
+                    isPlaying = false
+                    playerError = "Falha ao reproduzir o canal ao vivo."
+                }
+                MediaPlayer.Event.EndReached -> {
+                    isPlaying = false
+                }
+            }
+        }
+        vlcMediaPlayer.setEventListener(listener)
+        onDispose {
+            try {
+                vlcMediaPlayer.setEventListener(null)
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Android Lifecycle management
     DisposableEffect(lifecycleOwner, vlcMediaPlayer) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    vlcMediaPlayer.pause()
+                    try {
+                        vlcMediaPlayer.pause()
+                    } catch (_: Exception) {}
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     if (!isPaused && activeChannel != null) {
-                        vlcMediaPlayer.play()
+                        try {
+                            if (vlcMediaPlayer.vlcVout.areViewsAttached()) {
+                                vlcMediaPlayer.play()
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
                 else -> {}
@@ -1531,34 +1652,55 @@ fun LiveTvScreen(
         }
     }
 
-    // Playback state updates when activeChannel or retryTrigger changes
+    // Playback state updates with hardware decoding and strict surface synchronization
     LaunchedEffect(activeChannel?.streamUrl, retryTrigger) {
         val streamUrl = activeChannel?.streamUrl
         if (!streamUrl.isNullOrBlank()) {
             isLoadingStream = true
             playerError = null
             try {
-                val cleanedUrl = streamUrl.trim().replace("\r", "").replace("\n", "").replace(" ", "%20")
+                val cleanedUrl = streamUrl.trim().replace("\\r", "").replace("\\n", "").replace(" ", "%20")
                 try {
                     vlcMediaPlayer.stop()
                 } catch (_: Exception) {}
+
+                // NOTE: DO NOT detach views here! Surface must remain permanently attached to VLCVideoLayout
+                val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
+                    setHWDecoderEnabled(true, false)
+                    addOption(":codec=mediacodec,iomx,all")
+                    addOption(":mediacodec")
+                    addOption(":mediacodec-dr")
+                    addOption(":sout-keep")
+                    addOption(":http-reconnect=1")
+                    addOption(":network-caching=3000")
+                    addOption(":live-caching=3000")
+                    addOption(":file-caching=3000")
+                    addOption(":clock-jitter=0")
+                    addOption(":clock-synchro=0")
+                    addOption(":drop-late-frames")
+                    addOption(":skip-frames")
+                    addOption(":http-user-agent=FoxStream/1.0 (Android; LibVLC)")
+                    addOption(":http-referrer=")
+                    addOption(":no-sub-autodetect-file")
+                }
                 try {
-                    vlcMediaPlayer.detachViews()
+                    media.parseAsync(Media.Parse.ParseNetwork)
                 } catch (_: Exception) {}
 
-                val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
-                    addOption(":http-user-agent=VLC/3.0.18 LibVLC/3.0.18")
-                    addOption(":http-referrer=")
-                    addOption(":http-reconnect=1")
-                    addOption(":network-caching=5000")
-                }
                 vlcMediaPlayer.media = media
                 media.release()
-                if (!isPaused) {
-                    vlcMediaPlayer.play()
-                    isPlaying = true
+
+                // STRICT SYNCHRONIZATION: Only play when surface views are attached
+                val vout = vlcMediaPlayer.vlcVout
+                if (vout.areViewsAttached()) {
+                    if (!isPaused) {
+                        vlcMediaPlayer.play()
+                        isPlaying = true
+                    }
+                    isLoadingStream = false
+                } else {
+                    shouldPlayWhenReady = true
                 }
-                isLoadingStream = false
             } catch (e: Exception) {
                 isLoadingStream = false
                 playerError = "Falha ao conectar com o canal ao vivo."
@@ -1631,48 +1773,113 @@ fun LiveTvScreen(
         else ch.isFavorite || favoriteIds.contains(ch.id)
     }
 
-    // Root layout
+    // Root layout: Unified single-view player that smoothly resizes to 100% fullscreen
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF090A0F))
     ) {
-        if (isFullScreen) {
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
             // =========================================================================
-            // FULLSCREEN PLAYER (100% Immersive Screen, Landscape, zero margins or tabs)
+            // DYNAMIC VIDEO PLAYER CONTAINER (100% Immersive Fullscreen or 16:9 Embedded)
             // =========================================================================
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { showControls = !showControls },
+                modifier = (if (isFullScreen) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                })
+                .background(Color.Black)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { showControls = !showControls },
                 contentAlignment = Alignment.Center
             ) {
-                // Real VLC Surface
-                AndroidView(
-                    factory = { ctx ->
-                        VLCVideoLayout(ctx).apply {
-                            try {
-                                vlcMediaPlayer.detachViews()
-                            } catch (_: Exception) {}
-                            try {
+                // Permanent, lifecycle-synchronized VLC surface
+                if (activeChannel != null) {
+                    AndroidView(
+                        factory = { ctx ->
+                            VLCVideoLayout(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+                                    val w = r - l
+                                    val h = b - t
+                                    if (w > 0 && h > 0 && (w != (or - ol) || h != (ob - ot))) {
+                                        try {
+                                            vlcMediaPlayer.vlcVout.setWindowSize(w, h)
+                                            applyVlcScaleMode(vlcMediaPlayer, currentScaleIndex, w, h)
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                                val vout = vlcMediaPlayer.vlcVout
+                                vout.addCallback(object : IVLCVout.Callback {
+                                    override fun onSurfacesCreated(v: IVLCVout?) {
+                                        isSurfaceReady = true
+                                        if (shouldPlayWhenReady && vlcMediaPlayer.media != null && !vlcMediaPlayer.isPlaying && !isPaused) {
+                                            vlcMediaPlayer.play()
+                                            isPlaying = true
+                                            isLoadingStream = false
+                                            shouldPlayWhenReady = false
+                                        }
+                                    }
+                                    override fun onSurfacesDestroyed(v: IVLCVout?) {
+                                        isSurfaceReady = false
+                                    }
+                                })
                                 try {
-                                vlcMediaPlayer.detachViews()
-                            } catch (_: Exception) {}
-                            try {
-                                vlcMediaPlayer.attachViews(this, null, true, true)
-                            } catch (_: Exception) {}
-                            } catch (_: Exception) {}
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                                    if (!vout.areViewsAttached()) {
+                                        vlcMediaPlayer.attachViews(this, null, true, true)
+                                    }
+                                } catch (_: Exception) {}
 
-                // Buffering State
-                if (isLoadingStream && playerError == null) {
+                                applyVlcScaleMode(vlcMediaPlayer, currentScaleIndex)
+
+                                if (vlcMediaPlayer.media != null && !vlcMediaPlayer.isPlaying && !isPaused) {
+                                    vlcMediaPlayer.play()
+                                    isPlaying = true
+                                }
+                            }
+                        },
+                        update = { layout ->
+                            applyVlcScaleMode(vlcMediaPlayer, currentScaleIndex, layout.width, layout.height)
+                            if (layout.width > 0 && layout.height > 0) {
+                                try {
+                                    vlcMediaPlayer.vlcVout.setWindowSize(layout.width, layout.height)
+                                } catch (_: Exception) {}
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // No Channel placeholder
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = null,
+                            tint = Color(0xFF4B5563),
+                            modifier = Modifier.size(42.dp)
+                        )
+                        Text(
+                            text = "Selecione um canal para assistir",
+                            color = Color(0xFF9CA3AF),
+                            fontSize = 12.5.sp
+                        )
+                    }
+                }
+
+                // Buffering State Overlay
+                if (isLoadingStream && playerError == null && activeChannel != null) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1684,647 +1891,573 @@ fun LiveTvScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(36.dp),
+                                modifier = Modifier.size(if (isFullScreen) 38.dp else 28.dp),
                                 color = OrangePrimary,
                                 strokeWidth = 3.dp
                             )
                             Text(
                                 text = "Conectando ao canal...",
                                 color = Color.White.copy(alpha = 0.9f),
-                                fontSize = 12.sp,
+                                fontSize = if (isFullScreen) 13.sp else 11.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
                     }
                 }
 
-                // Error State
-                if (playerError != null) {
+                // Error State Overlay
+                if (playerError != null && activeChannel != null) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color.Black.copy(alpha = 0.88f))
-                            .padding(24.dp),
+                            .padding(16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Warning,
                                 contentDescription = null,
                                 tint = Color(0xFFFF5252),
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(if (isFullScreen) 36.dp else 26.dp)
                             )
                             Text(
-                                text = playerError ?: "Sinal indisponível no momento",
+                                text = playerError ?: "Falha ao abrir canal",
                                 color = Color.White,
-                                fontSize = 13.sp,
+                                fontSize = if (isFullScreen) 14.sp else 11.5.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(
                                     onClick = { retryTrigger += 1 },
                                     colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
                                 ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Reconectar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text("Reconectar", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                 }
-                                OutlinedButton(
-                                    onClick = { isFullScreen = false },
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
-                                ) {
-                                    Icon(Icons.Default.FullscreenExit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Sair da Tela Cheia", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                if (isFullScreen) {
+                                    OutlinedButton(
+                                        onClick = { isFullScreen = false },
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Icon(Icons.Default.FullscreenExit, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(5.dp))
+                                        Text("Sair da Tela Cheia", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                // Fullscreen Overlays: Top Header
-                LivePlayerAnimatedVisibility(
-                    visible = showControls || !isPlaying,
-                    modifier = Modifier.align(Alignment.TopCenter)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Black.copy(alpha = 0.9f), Color.Transparent)
-                                )
-                            )
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                // =========================================================================
+                // CONTROLS OVERLAY: FULLSCREEN VS EMBEDDED
+                // =========================================================================
+                if (isFullScreen) {
+                    // Fullscreen Overlays: Top Header
+                    LivePlayerAnimatedVisibility(
+                        visible = showControls || !isPlaying,
+                        modifier = Modifier.align(Alignment.TopCenter)
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color.Black.copy(alpha = 0.9f), Color.Transparent)
+                                    )
+                                )
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Back / Exit Fullscreen button
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                // Back / Exit Fullscreen button
+                                IconButton(
+                                    onClick = { isFullScreen = false },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowBack,
+                                        contentDescription = "Voltar",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Channel Logo
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF141724),
+                                    modifier = Modifier.size(width = 44.dp, height = 30.dp),
+                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f))
+                                ) {
+                                    if (activeChannel?.logoUrl.isNullOrBlank()) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = activeChannel?.name?.take(3)?.uppercase() ?: "TV",
+                                                color = OrangePrimary,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    } else {
+                                        SubcomposeAsyncImage(
+                                            model = activeChannel?.logoUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize().padding(2.dp),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                }
+
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        // Live pill badge
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0xFFEF4444)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(5.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color.White)
+                                                )
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text(
+                                                    text = "AO VIVO",
+                                                    color = Color.White,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+                                        }
+
+                                        Text(
+                                            text = activeChannel?.name ?: "",
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (!activeChannel?.category.isNullOrBlank()) {
+                                        Text(
+                                            text = activeChannel?.category ?: "",
+                                            color = Color(0xFF9CA3AF),
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Right side action: Favorite toggle
                             IconButton(
-                                onClick = { isFullScreen = false },
+                                onClick = { activeChannel?.let { onToggleFavorite(it) } },
                                 modifier = Modifier
                                     .size(38.dp)
                                     .background(Color.Black.copy(alpha = 0.5f), CircleShape)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ArrowBack,
-                                    contentDescription = "Voltar",
-                                    tint = Color.White,
+                                    imageVector = if (isCurrentFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "Favoritar",
+                                    tint = if (isCurrentFav) OrangePrimary else Color.White,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
+                        }
+                    }
 
-                            // Channel Logo
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF141724),
-                                modifier = Modifier.size(width = 44.dp, height = 30.dp),
-                                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f))
+                    // Fullscreen Overlays: Bottom Controls
+                    LivePlayerAnimatedVisibility(
+                        visible = showControls || !isPlaying,
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                                    )
+                                )
+                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                if (activeChannel?.logoUrl.isNullOrBlank()) {
+                                // Play/Pause
+                                Surface(
+                                    shape = CircleShape,
+                                    color = OrangePrimary,
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clickable {
+                                            if (isPlaying) {
+                                                vlcMediaPlayer.pause()
+                                                isPaused = true
+                                                isPlaying = false
+                                            } else {
+                                                vlcMediaPlayer.play()
+                                                isPaused = false
+                                                isPlaying = true
+                                            }
+                                        }
+                                ) {
                                     Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                            contentDescription = if (isPlaying) "Pausar" else "Reproduzir",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+
+                                // Reload
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = 0.15f),
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable { retryTrigger += 1 }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Recarregar",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                // Mute
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = 0.15f),
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable { isMuted = !isMuted }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                            contentDescription = "Áudio",
+                                            tint = if (isMuted) Color(0xFFFF5252) else Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                // Dynamic Aspect Ratio / Scale mode chip (Ajustar, 16:9, Zoom, Esticar)
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color.White.copy(alpha = 0.18f),
+                                    border = BorderStroke(1.dp, OrangePrimary.copy(alpha = 0.6f)),
+                                    modifier = Modifier.clickable {
+                                        currentScaleIndex = (currentScaleIndex + 1) % scaleModeNames.size
+                                    }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AspectRatio,
+                                            contentDescription = "Proporção de Tela",
+                                            tint = OrangePrimary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                         Text(
-                                            text = activeChannel?.name?.take(3)?.uppercase() ?: "TV",
-                                            color = OrangePrimary,
-                                            fontSize = 11.sp,
+                                            text = scaleModeNames[currentScaleIndex],
+                                            color = Color.White,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
-                                } else {
-                                    SubcomposeAsyncImage(
-                                        model = activeChannel?.logoUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize().padding(2.dp),
-                                        contentScale = ContentScale.Fit
-                                    )
                                 }
                             }
 
-                            Column {
+                            // Exit Fullscreen Button
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color.White.copy(alpha = 0.16f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                                modifier = Modifier.clickable { isFullScreen = false }
+                            ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    // Live pill badge
+                                    Icon(
+                                        imageVector = Icons.Default.FullscreenExit,
+                                        contentDescription = "Sair da Tela Cheia",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Sair da Tela Cheia",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // EMBEDDED PLAYER OVERLAY (When inside 16:9 box)
+                    if (activeChannel != null) {
+                        // Top live header
+                        LivePlayerAnimatedVisibility(
+                            visible = showControls || !isPlaying,
+                            modifier = Modifier.align(Alignment.TopStart)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent)
+                                        )
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
                                     Surface(
-                                        shape = RoundedCornerShape(4.dp),
+                                        shape = RoundedCornerShape(3.dp),
                                         color = Color(0xFFEF4444)
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(5.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color.White)
-                                            )
-                                            Spacer(modifier = Modifier.width(3.dp))
-                                            Text(
-                                                text = "AO VIVO",
-                                                color = Color.White,
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Black
-                                            )
-                                        }
+                                        Text(
+                                            text = "AO VIVO",
+                                            color = Color.White,
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
                                     }
-
                                     Text(
                                         text = activeChannel?.name ?: "",
                                         color = Color.White,
-                                        fontSize = 15.sp,
+                                        fontSize = 12.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                if (!activeChannel?.category.isNullOrBlank()) {
-                                    Text(
-                                        text = activeChannel?.category ?: "",
-                                        color = Color(0xFF9CA3AF),
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+
+                                IconButton(
+                                    onClick = { activeChannel?.let { onToggleFavorite(it) } },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isCurrentFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "Favoritar",
+                                        tint = if (isCurrentFav) OrangePrimary else Color.White,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
                         }
 
-                        // Right side action: Favorite toggle
-                        IconButton(
-                            onClick = { activeChannel?.let { onToggleFavorite(it) } },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = if (isCurrentFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = "Favoritar",
-                                tint = if (isCurrentFav) OrangePrimary else Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Fullscreen Overlays: Bottom Controls
-                LivePlayerAnimatedVisibility(
-                    visible = showControls || !isPlaying,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
-                                )
-                            )
-                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            // Play/Pause
-                            Surface(
-                                shape = CircleShape,
-                                color = OrangePrimary,
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clickable {
-                                        if (isPlaying) {
-                                            vlcMediaPlayer.pause()
-                                            isPaused = true
-                                            isPlaying = false
-                                        } else {
-                                            vlcMediaPlayer.play()
-                                            isPaused = false
-                                            isPlaying = true
-                                        }
-                                    }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = if (isPlaying) "Pausar" else "Reproduzir",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-
-                            // Reload
-                            Surface(
-                                shape = CircleShape,
-                                color = Color.White.copy(alpha = 0.15f),
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable { retryTrigger += 1 }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Recarregar",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-
-                            // Mute
-                            Surface(
-                                shape = CircleShape,
-                                color = Color.White.copy(alpha = 0.15f),
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable { isMuted = !isMuted }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                                        contentDescription = "Áudio",
-                                        tint = if (isMuted) Color(0xFFFF5252) else Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Exit Fullscreen Button
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color.White.copy(alpha = 0.16f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                            modifier = Modifier.clickable { isFullScreen = false }
+                        // Bottom Action Bar: Play/Pause, Reload, Mute, Scale Mode, Fullscreen
+                        LivePlayerAnimatedVisibility(
+                            visible = showControls || !isPlaying,
+                            modifier = Modifier.align(Alignment.BottomCenter)
                         ) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                                        )
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.FullscreenExit,
-                                    contentDescription = "Sair da Tela Cheia",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Sair da Tela Cheia",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // Play / Pause
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = OrangePrimary,
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clickable {
+                                                if (isPlaying) {
+                                                    vlcMediaPlayer.pause()
+                                                    isPaused = true
+                                                    isPlaying = false
+                                                } else {
+                                                    vlcMediaPlayer.play()
+                                                    isPaused = false
+                                                    isPlaying = true
+                                                }
+                                            }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+
+                                    // Reload
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color.Black.copy(alpha = 0.5f),
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .clickable { retryTrigger += 1 }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Recarregar",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+
+                                    // Mute
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color.Black.copy(alpha = 0.5f),
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .clickable { isMuted = !isMuted }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                                contentDescription = "Áudio",
+                                                tint = if (isMuted) Color(0xFFFF5252) else Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+
+                                    // Aspect Ratio / Scale mode chip
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color.Black.copy(alpha = 0.6f),
+                                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                                        modifier = Modifier.clickable {
+                                            currentScaleIndex = (currentScaleIndex + 1) % scaleModeNames.size
+                                        }
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AspectRatio,
+                                                contentDescription = "Proporção",
+                                                tint = OrangePrimary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = scaleModeNames[currentScaleIndex],
+                                                color = Color.White,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Fullscreen Button
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                                    modifier = Modifier.clickable {
+                                        isFullScreen = true
+                                    }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Fullscreen,
+                                            contentDescription = "Tela Cheia",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = "Tela Cheia",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-        } else {
+
             // =========================================================================
-            // STANDARD MODE: FIXED TOP PLAYER + INDEPENDENT SCROLLING CHANNEL LIST BELOW
+            // CHANNELS LIST & CATEGORIES (ONLY visible when not in fullscreen)
             // =========================================================================
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // FIXED TOP PLAYER
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF0F111A))
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        // 16:9 Video Canvas
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .background(Color.Black)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { showControls = !showControls },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (activeChannel != null) {
-                                AndroidView(
-                                    factory = { ctx ->
-                                        VLCVideoLayout(ctx).apply {
-                                            try {
-                                vlcMediaPlayer.detachViews()
-                            } catch (_: Exception) {}
-                            try {
-                                vlcMediaPlayer.attachViews(this, null, true, true)
-                            } catch (_: Exception) {}
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                // No Channel placeholder
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Tv,
-                                        contentDescription = null,
-                                        tint = Color(0xFF4B5563),
-                                        modifier = Modifier.size(42.dp)
-                                    )
-                                    Text(
-                                        text = "Selecione um canal para assistir",
-                                        color = Color(0xFF9CA3AF),
-                                        fontSize = 12.5.sp
-                                    )
-                                }
-                            }
-
-                            // Buffering Overlay
-                            if (isLoadingStream && playerError == null && activeChannel != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = 0.5f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(30.dp),
-                                            color = OrangePrimary,
-                                            strokeWidth = 2.5.dp
-                                        )
-                                        Text(
-                                            text = "Carregando...",
-                                            color = Color.White.copy(alpha = 0.9f),
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Error Overlay
-                            if (playerError != null && activeChannel != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = 0.85f))
-                                        .padding(12.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Warning,
-                                            contentDescription = null,
-                                            tint = Color(0xFFFF5252),
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        Text(
-                                            text = playerError ?: "Falha ao abrir canal",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Button(
-                                                onClick = { retryTrigger += 1 },
-                                                colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                                                shape = RoundedCornerShape(8.dp),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 3.dp),
-                                                modifier = Modifier.height(30.dp)
-                                            ) {
-                                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(13.dp))
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Tentar novamente", fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Top Info Overlay
-                            if (activeChannel != null) {
-                                LivePlayerAnimatedVisibility(
-                                    visible = showControls || !isPlaying,
-                                    modifier = Modifier.align(Alignment.TopCenter)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(
-                                                Brush.verticalGradient(
-                                                    colors = listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent)
-                                                )
-                                            )
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = Color(0xFFEF4444)
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(4.dp)
-                                                            .clip(CircleShape)
-                                                            .background(Color.White)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(3.dp))
-                                                    Text(
-                                                        text = "AO VIVO",
-                                                        color = Color.White,
-                                                        fontSize = 8.sp,
-                                                        fontWeight = FontWeight.Black
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = activeChannel?.name ?: "",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-
-                                        IconButton(
-                                            onClick = { activeChannel?.let { onToggleFavorite(it) } },
-                                            modifier = Modifier.size(28.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = if (isCurrentFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                                contentDescription = "Favoritar",
-                                                tint = if (isCurrentFav) OrangePrimary else Color.White,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Bottom Controls Overlay
-                                LivePlayerAnimatedVisibility(
-                                    visible = showControls || !isPlaying,
-                                    modifier = Modifier.align(Alignment.BottomCenter)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(
-                                                Brush.verticalGradient(
-                                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
-                                                )
-                                            )
-                                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            // Play / Pause
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = OrangePrimary,
-                                                modifier = Modifier
-                                                    .size(30.dp)
-                                                    .clickable {
-                                                        if (isPlaying) {
-                                                            vlcMediaPlayer.pause()
-                                                            isPaused = true
-                                                            isPlaying = false
-                                                        } else {
-                                                            vlcMediaPlayer.play()
-                                                            isPaused = false
-                                                            isPlaying = true
-                                                        }
-                                                    }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                        contentDescription = null,
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(17.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            // Reload
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = Color.Black.copy(alpha = 0.5f),
-                                                modifier = Modifier
-                                                    .size(26.dp)
-                                                    .clickable { retryTrigger += 1 }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Refresh,
-                                                        contentDescription = "Recarregar",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            // Mute
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = Color.Black.copy(alpha = 0.5f),
-                                                modifier = Modifier
-                                                    .size(26.dp)
-                                                    .clickable { isMuted = !isMuted }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                                                        contentDescription = "Áudio",
-                                                        tint = if (isMuted) Color(0xFFFF5252) else Color.White,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // Fullscreen Button
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = Color.Black.copy(alpha = 0.6f),
-                                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
-                                            modifier = Modifier.clickable {
-                                                activeChannel?.let { ch ->
-                                                    onPlay(ch.streamUrl, ch.name, ContentType.LIVE)
-                                                }
-                                            }
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Fullscreen,
-                                                    contentDescription = "Tela Cheia",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(15.dp)
-                                                )
-                                                Text(
-                                                    text = "Tela Cheia",
-                                                    color = Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Subtle bottom divider under player
-                        HorizontalDivider(
-                            color = Color(0xFF1E2233),
-                            thickness = 1.dp
-                        )
-                    }
-                }
-
-                // =========================================================================
-                // NAVIGATION BAR (Title, Count, Search Button, Category Button)
+            if (!isFullScreen) {
+                // Divider under player
+                HorizontalDivider(
+                    color = Color(0xFF1E2233),
+                    thickness = 1.dp
+                )// NAVIGATION BAR (Title, Count, Search Button, Category Button)
                 // =========================================================================
                 Surface(
                     color = Color(0xFF0D0F17),
@@ -2604,7 +2737,7 @@ fun LiveTvScreen(
                                 onSelect = { selectedCh ->
                                     userHasExplicitlySelectedChannel = true
                                     if (activeChannel?.id == selectedCh.id) {
-                                        onPlay(selectedCh.streamUrl, selectedCh.name, ContentType.LIVE)
+                                        isFullScreen = true
                                     } else {
                                         activeChannel = selectedCh
                                         prefs.edit().putString("last_live_channel_id", selectedCh.id).apply()
@@ -2621,7 +2754,7 @@ fun LiveTvScreen(
         // =========================================================================
         // CATEGORIES MODAL BOTTOM SHEET
         // =========================================================================
-        if (isCategorySheetOpen) {
+        if (isCategorySheetOpen && !isFullScreen) {
             ModalBottomSheet(
                 onDismissRequest = { isCategorySheetOpen = false },
                 containerColor = Color(0xFF10131F),

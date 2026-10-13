@@ -71,6 +71,13 @@ fun FoxStreamApp(
     var activePlayingMedia by remember { mutableStateOf<PlayingMedia?>(null) }
     var selectedSeriesForDetails by remember { mutableStateOf<SeriesItem?>(null) }
     var selectedMovieForDetails by remember { mutableStateOf<MovieItem?>(null) }
+    var isLiveTvFullScreen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentTab) {
+        if (currentTab != AppNavTab.LIVE) {
+            isLiveTvFullScreen = false
+        }
+    }
 
     val playlists = viewModel.playlists
     val activePlaylistId = viewModel.activePlaylistId
@@ -155,7 +162,8 @@ fun FoxStreamApp(
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
-                TopAppBar(
+                if (!isLiveTvFullScreen) {
+                    TopAppBar(
                     title = {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -218,9 +226,11 @@ fun FoxStreamApp(
                         containerColor = MaterialTheme.colorScheme.surface
                     )
                 )
+                }
             },
             bottomBar = {
-                Surface(
+                if (!isLiveTvFullScreen) {
+                    Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = Color(0xFF0A0C13),
                     tonalElevation = 0.dp
@@ -309,13 +319,14 @@ fun FoxStreamApp(
                         }
                     }
                 }
+                }
             },
             containerColor = MaterialTheme.colorScheme.background
         ) { paddingValues ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
+                    .padding(if (isLiveTvFullScreen) PaddingValues(0.dp) else paddingValues)
             ) {
                 val homeHistory = remember(continueWatching.toList(), history.toList()) {
                     val rawList = if (continueWatching.isNotEmpty()) {
@@ -411,6 +422,9 @@ fun FoxStreamApp(
                             onPlay = onPlayStream,
                             onToggleFavorite = { channel ->
                                 viewModel.toggleFavoriteChannel(channel)
+                            },
+                            onFullScreenChange = { isFullScreen ->
+                                isLiveTvFullScreen = isFullScreen
                             }
                         )
                         AppNavTab.MOVIES -> MoviesScreen(

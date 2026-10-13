@@ -53,6 +53,8 @@ import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.util.VLCVideoLayout
+import org.videolan.libvlc.interfaces.IVLCVout
+import android.view.ViewGroup
 import okhttp3.OkHttpClient
 import okhttp3.ConnectionSpec
 import okhttp3.TlsVersion
@@ -306,17 +308,32 @@ fun PlayerScreen(
                 exoPlayer.stop()
                 exoPlayer.clearMediaItems()
 
-                // Setup and Play VLC
-                android.util.Log.d("FoxStreamPlayer", "Inicializando reprodução libVLC para: $cleanedUrl")
+                // Setup and Play VLC with hardware decoding
+                android.util.Log.d("FoxStreamPlayer", "Inicializando reprodução libVLC com aceleração de hardware para: $cleanedUrl")
                 val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
-                    addOption(":http-user-agent=VLC/3.0.18 LibVLC/3.0.18")
-                    addOption(":http-referrer=")
+                    setHWDecoderEnabled(true, false)
+                    addOption(":codec=mediacodec,iomx,all")
+                    addOption(":sout-keep")
                     addOption(":http-reconnect=1")
-                    addOption(":network-caching=5000")
+                    addOption(":network-caching=3000")
+                    addOption(":live-caching=3000")
+                    addOption(":file-caching=3000")
+                    addOption(":clock-jitter=0")
+                    addOption(":clock-synchro=0")
+                    addOption(":drop-late-frames")
+                    addOption(":skip-frames")
+                    addOption(":http-user-agent=FoxStream/1.0 (Android; LibVLC)")
+                    addOption(":http-referrer=")
+                    addOption(":no-sub-autodetect-file")
                 }
+                try {
+                    media.parseAsync(Media.Parse.ParseNetwork)
+                } catch (_: Exception) {}
                 vlcMediaPlayer.media = media
                 media.release()
-                vlcMediaPlayer.play()
+                if (vlcMediaPlayer.vlcVout.areViewsAttached()) {
+                    vlcMediaPlayer.play()
+                }
                 isPlaying = true
                 playbackState = Player.STATE_BUFFERING
             } else {
@@ -678,10 +695,33 @@ fun PlayerScreen(
             AndroidView(
                 factory = { ctx ->
                     VLCVideoLayout(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+                            val w = r - l
+                            val h = b - t
+                            if (w > 0 && h > 0 && (w != (or - ol) || h != (ob - ot))) {
+                                try {
+                                    vlcMediaPlayer.vlcVout.setWindowSize(w, h)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        val vout = vlcMediaPlayer.vlcVout
+                        vout.addCallback(object : IVLCVout.Callback {
+                            override fun onSurfacesCreated(v: IVLCVout?) {
+                                if (vlcMediaPlayer.media != null && !vlcMediaPlayer.isPlaying) {
+                                    vlcMediaPlayer.play()
+                                }
+                            }
+                            override fun onSurfacesDestroyed(v: IVLCVout?) {}
+                        })
                         try {
-                            vlcMediaPlayer.detachViews()
+                            if (!vout.areViewsAttached()) {
+                                vlcMediaPlayer.attachViews(this, null, true, true)
+                            }
                         } catch (_: Exception) {}
-                        vlcMediaPlayer.attachViews(this, null, true, true)
                         // Initial scale mode application
                         when (currentScaleIndex) {
                             0 -> { // Fit
