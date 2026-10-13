@@ -1684,7 +1684,7 @@ fun LiveTvScreen(
                     addOption(":no-sub-autodetect-file")
                 }
                 try {
-                    media.parseAsync(Media.Parse.ParseNetwork)
+                    media.parseAsync()
                 } catch (_: Exception) {}
 
                 vlcMediaPlayer.media = media
