@@ -351,28 +351,36 @@ fun FoxStreamApp(
                         query = viewModel.searchQuery,
                         onQueryChange = { viewModel.onSearchQueryChanged(it, searchScope) },
                         isSearching = viewModel.isSearching,
-                        searchTmdbResults = viewModel.searchTmdbResults,
+                        searchMovies = viewModel.searchMovies,
+                        searchSeries = viewModel.searchSeries,
+                        searchChannels = viewModel.searchChannels,
                         favorites = favorites,
-                        onPlay = { url, title, type ->
-                            onPlayStream(url, title, type)
+                        onPlayMovie = { movie ->
+                            onPlayStream(movie.streamUrl, movie.name, ContentType.MOVIE)
                             showSearchScreen = false
                         },
-                        onPlayTmdb = { tmdbResult ->
-                            viewModel.playTmdbSearchResult(tmdbResult) { url, title, type ->
-                                onPlayStream(url, title, type)
-                                showSearchScreen = false
-                            }
-                        },
-                        onOpenTmdbDetails = { tmdbResult ->
+                        onPlaySeries = { series ->
+                            // Open series details to choose episode
                             showSearchScreen = false
-                            val route = NavDestinations.buildMovieDetailsRoute(tmdbResult.tmdbId?.toString() ?: "0")
-                            navigateToRoute(route)
+                            navigateToRoute(NavDestinations.buildSeriesDetailsRoute(series.id))
                         },
-                        onToggleFavoriteTmdb = { tmdbResult ->
-                            viewModel.toggleFavoriteTmdb(tmdbResult)
+                        onPlayChannel = { channel ->
+                            onPlayStream(channel.streamUrl, channel.name, ContentType.LIVE)
+                            showSearchScreen = false
                         },
-                        onAddToListTmdb = { tmdbResult ->
-                            // Add to list action
+                        onOpenMovieDetails = { movie ->
+                            showSearchScreen = false
+                            navigateToRoute(NavDestinations.buildMovieDetailsRoute(movie.id))
+                        },
+                        onOpenSeriesDetails = { series ->
+                            showSearchScreen = false
+                            navigateToRoute(NavDestinations.buildSeriesDetailsRoute(series.id))
+                        },
+                        onToggleFavoriteMovie = { movie ->
+                            viewModel.toggleFavoriteMovie(movie)
+                        },
+                        onToggleFavoriteSeries = { series ->
+                            viewModel.toggleFavoriteSeries(series)
                         },
                         searchScope = searchScope,
                         onClose = {
