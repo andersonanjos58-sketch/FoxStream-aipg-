@@ -1672,9 +1672,9 @@ fun LiveTvScreen(
                     addOption(":mediacodec-dr")
                     addOption(":sout-keep")
                     addOption(":http-reconnect=1")
-                    addOption(":network-caching=3000")
-                    addOption(":live-caching=3000")
-                    addOption(":file-caching=3000")
+                    addOption(":network-caching=1200")
+                    addOption(":live-caching=1200")
+                    addOption(":file-caching=1000")
                     addOption(":clock-jitter=0")
                     addOption(":clock-synchro=0")
                     addOption(":drop-late-frames")
@@ -2716,20 +2716,18 @@ fun LiveTvScreen(
                         }
                     }
                 } else {
-                    // Premium Channels Grid
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 150.dp),
+                    // Channels List (1 per row with EPG and progress bar)
+                    LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
-                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 28.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(filtered, key = { it.id }) { channel ->
                             val isFav = channel.isFavorite || favoriteIds.contains(channel.id)
                             val isCurrent = activeChannel?.id == channel.id
-                            LiveChannelGridCard(
+                            LiveChannelRowCard(
                                 channel = channel,
                                 isFavorite = isFav,
                                 isSelected = isCurrent,
@@ -3349,6 +3347,202 @@ fun LiveChannelGridCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LiveChannelRowCard(
+    channel: LiveChannel,
+    isFavorite: Boolean,
+    isSelected: Boolean = false,
+    onPlay: (String, String, ContentType) -> Unit,
+    onSelect: ((LiveChannel) -> Unit)? = null,
+    onToggleFavorite: (LiveChannel) -> Unit
+) {
+    val epgPrograms = remember(channel.id) { generateEpgPrograms(channel) }
+    val currentProgram = remember(epgPrograms) {
+        epgPrograms.find { it.progressPercent > 0f && it.progressPercent < 1f } ?: epgPrograms.firstOrNull()
+    }
+    val currentIndex = currentProgram?.let { epgPrograms.indexOf(it) } ?: 0
+    val nextProgram = epgPrograms.getOrNull(currentIndex + 1)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable {
+                if (onSelect != null) {
+                    onSelect(channel)
+                } else {
+                    onPlay(channel.streamUrl, channel.name, ContentType.LIVE)
+                }
+            },
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) Color(0xFF1E1712) else Color(0xFF131622),
+        border = BorderStroke(
+            if (isSelected) 1.5.dp else 1.dp,
+            if (isSelected) OrangePrimary else Color.White.copy(alpha = 0.07f)
+        ),
+        tonalElevation = if (isSelected) 4.dp else 1.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(76.dp)
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF0F111A)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (channel.logoUrl.isNullOrBlank()) {
+                    ChannelLogoPlaceholder(
+                        channelName = channel.name,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    SubcomposeAsyncImage(
+                        model = channel.logoUrl,
+                        contentDescription = channel.name,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(6.dp),
+                        contentScale = ContentScale.Fit,
+                        loading = {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = OrangePrimary.copy(alpha = 0.6f),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        },
+                        error = {
+                            ChannelLogoPlaceholder(
+                                channelName = channel.name,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    )
+                }
+
+                if (isSelected) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color.Black.copy(alpha = 0.8f),
+                        border = BorderStroke(0.5.dp, OrangePrimary),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(2.dp)
+                    ) {
+                        Text(
+                            text = "NO AR",
+                            color = OrangePrimary,
+                            fontSize = 7.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = channel.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = if (isSelected) OrangePrimary else Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (channel.category.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(1.dp))
+                            Text(
+                                text = channel.category,
+                                fontSize = 10.sp,
+                                color = Color(0xFF9CA3AF),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { onToggleFavorite(channel) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorito",
+                            tint = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                if (currentProgram != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = currentProgram.title,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFE2E8F0),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "${currentProgram.startTime} - ${currentProgram.endTime}",
+                            fontSize = 10.sp,
+                            color = Color(0xFF94A3B8),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = { currentProgram.progressPercent },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = OrangePrimary,
+                        trackColor = Color(0xFF262C40),
+                    )
+
+                    if (nextProgram != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Próximo: ${nextProgram.title} (${nextProgram.startTime})",
+                            fontSize = 10.sp,
+                            color = Color(0xFF64748B),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -5624,7 +5818,7 @@ fun AddPlaylistDialog(
 }
 
 // ==========================================
-// 9. GLOBAL SEARCH SCREEN
+// 9. GLOBAL SEARCH SCREEN (TMDB FIRST & BACKDROP CARDS)
 // ==========================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -5632,34 +5826,27 @@ fun GlobalSearchScreen(
     query: String,
     onQueryChange: (String) -> Unit,
     isSearching: Boolean,
-    searchChannels: List<LiveChannel>,
-    searchMovies: List<MovieItem>,
-    searchSeries: List<SeriesItem>,
-    searchEpisodes: List<Pair<SeriesItem, EpisodeItem>>,
+    searchTmdbResults: List<TmdbResult>,
+    favorites: List<FavoriteItem>,
     onPlay: (String, String, ContentType) -> Unit,
-    onOpenMovie: (MovieItem) -> Unit = {},
-    searchScope: String = "ALL", // "ALL", "MOVIE", "SERIES"
+    onPlayTmdb: (TmdbResult) -> Unit,
+    onOpenTmdbDetails: (TmdbResult) -> Unit,
+    onToggleFavoriteTmdb: (TmdbResult) -> Unit,
+    onAddToListTmdb: (TmdbResult) -> Unit,
+    searchScope: String = "ALL",
     onClose: () -> Unit
 ) {
     val placeholderText = when (searchScope) {
-        "MOVIE" -> "Buscar em filmes..."
-        "SERIES" -> "Buscar em séries..."
-        else -> "Buscar TV, Filmes, Séries e Episódios..."
+        "MOVIE" -> "Buscar filmes no TMDb..."
+        "SERIES" -> "Buscar séries no TMDb..."
+        else -> "Buscar TV, Filmes e Séries no TMDb..."
     }
 
     val emptyText = when (searchScope) {
-        "MOVIE" -> "Digite algo para buscar em filmes"
-        "SERIES" -> "Digite algo para buscar em séries"
-        else -> "Digite algo para buscar no catálogo"
+        "MOVIE" -> "Digite algo para buscar filmes"
+        "SERIES" -> "Digite algo para buscar séries"
+        else -> "Digite algo para buscar no TMDb"
     }
-
-    // Determine if we actually have any matched results shown for the current searchScope
-    val showChannels = searchScope == "ALL" && searchChannels.isNotEmpty()
-    val showMovies = (searchScope == "ALL" || searchScope == "MOVIE") && searchMovies.isNotEmpty()
-    val showSeries = (searchScope == "ALL" || searchScope == "SERIES") && searchSeries.isNotEmpty()
-    val showEpisodes = (searchScope == "ALL" || searchScope == "SERIES") && searchEpisodes.isNotEmpty()
-
-    val hasResults = showChannels || showMovies || showSeries || showEpisodes
 
     Column(
         modifier = Modifier
@@ -5702,132 +5889,27 @@ fun GlobalSearchScreen(
                     Text(emptyText, color = Color.Gray)
                 }
             }
-        } else if (!hasResults) {
+        } else if (searchTmdbResults.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Nenhum resultado encontrado.", color = Color.Gray)
+                Text("Nenhum resultado encontrado para \"$query\".", color = Color.Gray)
             }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
             ) {
-                if (showChannels) {
-                    item {
-                        Text("TV ao Vivo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
-                    items(searchChannels, key = { "srch_ch_${it.id}" }) { ch ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPlay(ch.streamUrl, ch.name, ContentType.LIVE) },
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CoilPosterImage(
-                                    url = ch.logoUrl,
-                                    placeholderIcon = Icons.Default.Tv,
-                                    modifier = Modifier.size(50.dp).clip(RoundedCornerShape(6.dp))
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(ch.name, fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text(ch.category, fontSize = 11.sp, color = Color.Gray)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (showMovies) {
-                    item {
-                        Text("Filmes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
-                    items(searchMovies, key = { "srch_m_${it.id}" }) { m ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onOpenMovie(m)
-                                },
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CoilPosterImage(
-                                    url = m.posterUrl,
-                                    placeholderIcon = Icons.Default.Movie,
-                                    modifier = Modifier.size(50.dp).clip(RoundedCornerShape(6.dp))
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(m.name, fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text(m.category, fontSize = 11.sp, color = Color.Gray)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (showSeries) {
-                    item {
-                        Text("Séries", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
-                    items(searchSeries, key = { "srch_s_${it.id}" }) { s ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val firstEp = s.seasons.firstOrNull()?.episodes?.firstOrNull()
-                                    if (firstEp != null) {
-                                        onPlay(firstEp.streamUrl, "${s.name} - ${firstEp.title}", ContentType.SERIES)
-                                    }
-                                },
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CoilPosterImage(
-                                    url = s.posterUrl,
-                                    placeholderIcon = Icons.Default.VideoLibrary,
-                                    modifier = Modifier.size(50.dp).clip(RoundedCornerShape(6.dp))
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(s.name, fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text(s.category, fontSize = 11.sp, color = Color.Gray)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (showEpisodes) {
-                    item {
-                        Text("Episódios", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
-                    items(searchEpisodes, key = { "srch_ep_${it.first.id}_${it.second.id}" }) { (series, ep) ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPlay(ep.streamUrl, "${series.name} - ${ep.title}", ContentType.SERIES) },
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surface
-                        ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CoilPosterImage(
-                                    url = series.posterUrl,
-                                    placeholderIcon = Icons.Default.PlayArrow,
-                                    modifier = Modifier.size(50.dp).clip(RoundedCornerShape(6.dp))
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(ep.title, fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text("${series.name} • Temporada ${ep.seasonNum}", fontSize = 11.sp, color = Color.Gray)
-                                }
-                            }
-                        }
-                    }
+                items(searchTmdbResults, key = { "tmdb_search_${it.tmdbId}" }) { item ->
+                    val contentId = item.tmdbId?.toString() ?: ""
+                    val isFav = favorites.any { it.contentId == contentId }
+                    BackdropSearchCard(
+                        item = item,
+                        isFavorite = isFav,
+                        onPlay = { onPlayTmdb(it) },
+                        onToggleFavorite = { onToggleFavoriteTmdb(it) },
+                        onOpenDetails = { onOpenTmdbDetails(it) },
+                        onAddToList = { onAddToListTmdb(it) }
+                    )
                 }
             }
         }
@@ -5835,21 +5917,195 @@ fun GlobalSearchScreen(
 }
 
 @Composable
-fun LivePlayerAnimatedVisibility(
-    visible: Boolean,
-    modifier: Modifier = Modifier,
-    enter: EnterTransition = fadeIn(),
-    exit: ExitTransition = fadeOut(),
-    content: @Composable AnimatedVisibilityScope.() -> Unit
+fun BackdropSearchCard(
+    item: TmdbResult,
+    isFavorite: Boolean,
+    onPlay: (TmdbResult) -> Unit,
+    onToggleFavorite: (TmdbResult) -> Unit,
+    onOpenDetails: (TmdbResult) -> Unit,
+    onAddToList: (TmdbResult) -> Unit
 ) {
-    androidx.compose.animation.AnimatedVisibility(
-        visible = visible,
-        enter = enter,
-        exit = exit,
-        modifier = modifier
+    var isFindingStream by remember { mutableStateOf(false) }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF131622),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        tonalElevation = 4.dp
     ) {
-        content()
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Top: Horizontal Backdrop Image (16:9)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(Color(0xFF0F111A)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (item.backdrop.isNullOrBlank()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = Color.Gray,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                } else {
+                    SubcomposeAsyncImage(
+                        model = item.backdrop,
+                        contentDescription = item.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        loading = {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = OrangePrimary,
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        },
+                        error = {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Movie,
+                                    contentDescription = null,
+                                    tint = Color.Gray,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+
+            // Body of Card
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = item.title ?: "Título Desconhecido",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val metaText = listOfNotNull(
+                    item.year,
+                    item.runtime,
+                    item.rating?.let { "★ $it" }
+                ).joinToString(" • ")
+
+                if (metaText.isNotBlank()) {
+                    Text(
+                        text = metaText,
+                        fontSize = 12.sp,
+                        color = Color(0xFF9CA3AF),
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                Button(
+                    enabled = !isFindingStream,
+                    onClick = {
+                        isFindingStream = true
+                        onPlay(item)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    if (isFindingStream) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color.Black,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Localizando stream...",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Assistir",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = { onToggleFavorite(item) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.8f))
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Favoritos", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    TextButton(
+                        onClick = { onAddToList(item) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color.White.copy(alpha = 0.8f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlaylistAdd,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Listas", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    TextButton(
+                        onClick = { onOpenDetails(item) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color.White.copy(alpha = 0.8f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Detalhes", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
     }
 }
-
-

@@ -555,4 +555,53 @@ object TmdbApiClient {
             null
         }
     }
+    suspend fun searchMulti(query: String): List<TmdbResult> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<TmdbResult>()
+        try {
+            val (apiKey, token) = getAuthCredentials()
+            if (apiKey.isBlank() && token.isBlank()) return@withContext emptyList()
+
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val url = "$BASE_URL/search/multi?query=$encodedQuery&language=pt-BR&include_adult=false"
+            val json = fetchJson(url, apiKey, token) ?: return@withContext emptyList()
+            val results = json.optJSONArray("results") ?: return@withContext emptyList()
+
+            for (i in 0 until results.length()) {
+                val item = results.getJSONObject(i)
+                val mediaType = item.optString("media_type", "")
+                if (mediaType != "movie" && mediaType != "tv") continue
+
+                val id = item.optInt("id", 0)
+                if (id <= 0) continue
+
+                val isTv = mediaType == "tv"
+                val title = (if (isTv) item.optString("name", null) else item.optString("title", null))?.takeIf { it.isNotBlank() } ?: continue
+                val origTitle = (if (isTv) item.optString("original_name", null) else item.optString("original_title", null))?.takeIf { it.isNotBlank() }
+                val dateField = if (isTv) "first_air_date" else "release_date"
+                val date = item.optString(dateField, null)
+                val year = date?.take(4)?.takeIf { it.isNotBlank() }
+                val plot = item.optString("overview", null)?.takeIf { it.isNotBlank() }
+                val posterPath = item.optString("poster_path", null)?.takeIf { it.isNotBlank() && it != "null" }
+                val poster = posterPath?.let { "$POSTER_BASE_URL$it" }
+                val backdropPath = item.optString("backdrop_path", null)?.takeIf { it.isNotBlank() && it != "null" }
+                val backdrop = backdropPath?.let { "$BACKDROP_BASE_URL$it" } ?: poster
+                val voteAvg = item.optDouble("vote_average", 0.0)
+                val rating = if (voteAvg > 0.0) String.format(Locale.US, "%.1f", voteAvg) else null
+
+                list.add(TmdbResult(
+                    title = title,
+                    originalTitle = origTitle,
+                    year = year,
+                    plot = plot,
+                    poster = poster,
+                    backdrop = backdrop,
+                    rating = rating,
+                    tmdbId = id
+                ))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in searchMulti: ${e.message}", e)
+        }
+        list
+    }
 }

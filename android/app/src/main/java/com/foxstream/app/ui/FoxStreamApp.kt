@@ -351,18 +351,28 @@ fun FoxStreamApp(
                         query = viewModel.searchQuery,
                         onQueryChange = { viewModel.onSearchQueryChanged(it, searchScope) },
                         isSearching = viewModel.isSearching,
-                        searchChannels = viewModel.searchChannels,
-                        searchMovies = viewModel.searchMovies,
-                        searchSeries = viewModel.searchSeries,
-                        searchEpisodes = viewModel.searchEpisodes,
+                        searchTmdbResults = viewModel.searchTmdbResults,
+                        favorites = favorites,
                         onPlay = { url, title, type ->
                             onPlayStream(url, title, type)
                             showSearchScreen = false
                         },
-                        onOpenMovie = { movie ->
+                        onPlayTmdb = { tmdbResult ->
+                            viewModel.playTmdbSearchResult(tmdbResult) { url, title, type ->
+                                onPlayStream(url, title, type)
+                                showSearchScreen = false
+                            }
+                        },
+                        onOpenTmdbDetails = { tmdbResult ->
                             showSearchScreen = false
-                            val route = NavDestinations.buildMovieDetailsRoute(movie.id)
+                            val route = NavDestinations.buildMovieDetailsRoute(tmdbResult.tmdbId?.toString() ?: "0")
                             navigateToRoute(route)
+                        },
+                        onToggleFavoriteTmdb = { tmdbResult ->
+                            viewModel.toggleFavoriteTmdb(tmdbResult)
+                        },
+                        onAddToListTmdb = { tmdbResult ->
+                            // Add to list action
                         },
                         searchScope = searchScope,
                         onClose = {

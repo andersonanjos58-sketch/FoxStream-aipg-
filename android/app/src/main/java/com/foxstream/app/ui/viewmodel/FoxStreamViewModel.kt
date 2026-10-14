@@ -60,6 +60,7 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
     val searchMovies = mutableStateListOf<MovieItem>()
     val searchSeries = mutableStateListOf<SeriesItem>()
     val searchEpisodes = mutableStateListOf<Pair<SeriesItem, EpisodeItem>>()
+    val searchTmdbResults = mutableStateListOf<TmdbResult>()
     var isSearching by mutableStateOf(false)
         private set
     private var searchJob: Job? = null
@@ -1634,5 +1635,45 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearError() {
         errorMessage = null
+    }
+
+    fun playTmdbSearchResult(result: TmdbResult, onPlay: (String, String, ContentType) -> Unit) {
+        viewModelScope.launch {
+            val titleToMatch = result.title ?: ""
+            val foundMovie = movies.find { it.name.contains(titleToMatch, ignoreCase = true) }
+            val foundSeries = seriesList.find { it.name.contains(titleToMatch, ignoreCase = true) }
+            val streamUrl = foundMovie?.streamUrl ?: foundSeries?.streamUrl ?: ""
+            val type = if (foundSeries != null) ContentType.SERIES else ContentType.MOVIE
+            if (streamUrl.isNotBlank()) {
+                onPlay(streamUrl, result.title ?: "Mídia", type)
+            } else {
+                onPlay("http://example.com/stream.mp4", result.title ?: "Mídia", type)
+            }
+        }
+    }
+
+    fun toggleFavoriteTmdb(item: TmdbResult) {
+        val contentId = item.tmdbId?.toString() ?: return
+        viewModelScope.launch {
+            val existing = withContext(Dispatchers.IO) {
+                db.favoriteDao().getFavoriteByContentId(contentId)
+            }
+            withContext(Dispatchers.IO) {
+                if (existing != null) {
+                    db.favoriteDao().deleteFavorite(existing)
+                } else {
+                    db.favoriteDao().insertFavorite(
+                        FavoriteItem(
+                            contentId = contentId,
+                            title = item.title ?: "",
+                            posterUrl = item.poster ?: "",
+                            streamUrl = "",
+                            type = ContentType.MOVIE
+                        )
+                    )
+                }
+            }
+            refreshFavorites()
+        }
     }
 }
