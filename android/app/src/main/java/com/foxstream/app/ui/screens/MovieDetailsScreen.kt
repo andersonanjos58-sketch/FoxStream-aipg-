@@ -37,8 +37,8 @@ import com.foxstream.app.data.model.HistoryItem
 import com.foxstream.app.data.model.MovieItem
 import com.foxstream.app.ui.navigation.NavDestinations
 
-private val OrangePrimary = Color(0xFFFF6600)
-private val DarkBackground = Color(0xFF0B0E17)
+import com.foxstream.app.ui.theme.OrangePrimary
+import com.foxstream.app.ui.theme.DarkBackground
 private val CardSurfaceColor = Color(0xFF161924)
 private val ChipBackground = Color(0xFF1E2333)
 

@@ -64,6 +64,24 @@ O repositório já possui a automação de CI/CD configurada em `.github/workflo
 
 ---
 
+
+### 🛠️ Correções de Compilação Android Realizadas:
+1. **FoxStreamApp.kt**:
+   - Ajustadas as rotas e seletores de séries (`onPlaySeries` e `onOpenSeriesDetails`) para selecionar diretamente a série e mudar para a aba de séries (`selectedSeriesForDetails = series`, `currentTab = AppNavTab.SERIES`).
+   - Implementado suporte completo a `toggleFavoriteSeries` e navegação de rotas de séries.
+2. **FoxStreamViewModel.kt**:
+   - Adicionada a função `toggleFavoriteSeries(series: SeriesItem)` para persistência no banco Room com tipo `ContentType.SERIES`.
+3. **NavGraph.kt**:
+   - Incluídos os métodos auxiliares `buildSeriesDetailsRoute` e `parseSeriesId` no objeto `NavDestinations`.
+4. **Screens.kt & MovieDetailsScreen.kt**:
+   - Removida a declaração `private val OrangePrimary` de escopo de pacote em `MovieDetailsScreen.kt` que bloqueava o acesso em `Screens.kt`.
+   - Adicionadas todas as importações necessárias em `Screens.kt`:
+     - **Coil**: `AsyncImage`
+     - **Compose Foundation Pager**: `HorizontalPager`, `rememberPagerState`, `collectIsDraggedAsState`
+     - **LibVLC**: `LibVLC`, `Media`, `MediaPlayer`, `VLCVideoLayout`, `IVLCVout`
+     - **Android & Lifecycle**: `Uri`, `ViewGroup`, `AndroidView`, `Lifecycle`, `LifecycleEventObserver`, `LocalLifecycleOwner`, `Job`
+     - **Tema Global**: `OrangePrimary`, `DarkBackground`, etc.
+
 ## ✅ Status de Compilação
 - **TypeScript / React**: Compilado com 0 erros (`compile_applet`).
 - **Linter & Type Checking**: 100% aprovado (`tsc --noEmit`).

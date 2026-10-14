@@ -835,6 +835,31 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun toggleFavoriteSeries(series: SeriesItem) {
+        viewModelScope.launch {
+            val existing = withContext(Dispatchers.IO) {
+                db.favoriteDao().getFavoriteByContentId(series.id)
+            }
+            withContext(Dispatchers.IO) {
+                if (existing != null) {
+                    db.favoriteDao().deleteFavoriteByContentId(series.id)
+                } else {
+                    val fav = FavoriteItem(
+                        id = "fav_${series.id}",
+                        contentId = series.id,
+                        type = ContentType.SERIES,
+                        title = series.name,
+                        category = series.category,
+                        streamUrl = series.coverUrl ?: "",
+                        posterUrl = series.coverUrl
+                    )
+                    db.favoriteDao().insertFavorite(fav)
+                }
+            }
+            refreshFavorites()
+        }
+    }
+
     fun toggleFavoriteMovie(movie: MovieItem) {
         viewModelScope.launch {
             val existing = withContext(Dispatchers.IO) {

@@ -32,7 +32,24 @@ object NavDestinations {
         }
     }
 
-    // 2. Rota do player: "player_screen/{streamUrl}"
+    // 2. Rota de detalhes da série: "series_details/{seriesId}"
+    const val ARG_SERIES_ID = "seriesId"
+    const val ROUTE_SERIES_DETAILS = "series_details/{$ARG_SERIES_ID}"
+
+    fun buildSeriesDetailsRoute(seriesId: String): String {
+        val encodedId = URLEncoder.encode(seriesId, "UTF-8")
+        return "series_details/$encodedId"
+    }
+
+    fun parseSeriesId(rawArg: String): String {
+        return try {
+            URLDecoder.decode(rawArg, "UTF-8")
+        } catch (_: Exception) {
+            rawArg
+        }
+    }
+
+    // 3. Rota do player: "player_screen/{streamUrl}"
     const val ARG_STREAM_URL = "streamUrl"
     const val ROUTE_PLAYER = "player_screen/{$ARG_STREAM_URL}"
 

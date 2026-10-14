@@ -372,7 +372,8 @@ fun FoxStreamApp(
                         onPlaySeries = { series ->
                             // Open series details to choose episode
                             showSearchScreen = false
-                            navigateToRoute(NavDestinations.buildSeriesDetailsRoute(series.id))
+                            selectedSeriesForDetails = series
+                            currentTab = AppNavTab.SERIES
                         },
                         onPlayChannel = { channel ->
                             onPlayStream(channel.streamUrl, channel.name, ContentType.LIVE)
@@ -384,7 +385,8 @@ fun FoxStreamApp(
                         },
                         onOpenSeriesDetails = { series ->
                             showSearchScreen = false
-                            navigateToRoute(NavDestinations.buildSeriesDetailsRoute(series.id))
+                            selectedSeriesForDetails = series
+                            currentTab = AppNavTab.SERIES
                         },
                         onToggleFavoriteMovie = { movie ->
                             viewModel.toggleFavoriteMovie(movie)
