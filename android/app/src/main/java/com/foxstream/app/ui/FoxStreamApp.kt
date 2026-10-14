@@ -135,6 +135,16 @@ fun FoxStreamApp(
                     selectedMovieForDetails = foundMovie
                 }
             }
+            route.startsWith("series_details/") -> {
+                val rawId = route.removePrefix("series_details/")
+                val seriesId = NavDestinations.parseSeriesId(rawId)
+                val foundSeries = seriesList.find { it.id == seriesId } ?:
+                    (viewModel.popularSeries + viewModel.homePreviewSeries).find { it.id == seriesId }
+                if (foundSeries != null) {
+                    selectedSeriesForDetails = foundSeries
+                    currentTab = AppNavTab.SERIES
+                }
+            }
             route.startsWith("player_screen/") -> {
                 val rawUrl = route.removePrefix("player_screen/")
                 val streamUrl = NavDestinations.parseStreamUrl(rawUrl)
