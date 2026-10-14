@@ -850,8 +850,8 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
                         type = ContentType.SERIES,
                         title = series.name,
                         category = series.category,
-                        streamUrl = series.coverUrl ?: "",
-                        posterUrl = series.coverUrl
+                        streamUrl = series.posterUrl ?: "",
+                        posterUrl = series.posterUrl
                     )
                     db.favoriteDao().insertFavorite(fav)
                 }

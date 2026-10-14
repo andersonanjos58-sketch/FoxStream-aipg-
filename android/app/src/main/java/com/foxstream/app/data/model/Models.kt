@@ -189,4 +189,10 @@ data class EpgProgram(
     val progressPercent: Float = 0f
 )
 
+// Compatibilidade de propriedades
+val LiveChannel.tvgLogo: String?
+    get() = logoUrl
+
+val SeriesItem.coverUrl: String?
+    get() = posterUrl
 

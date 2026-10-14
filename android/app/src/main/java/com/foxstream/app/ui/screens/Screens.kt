@@ -64,6 +64,15 @@ import androidx.lifecycle.LifecycleOwner
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import com.foxstream.app.data.model.*
+import com.foxstream.app.R
+import com.foxstream.app.ui.AppNavTab
+import com.foxstream.app.util.SearchUtils
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.foxstream.app.ui.theme.OrangePrimary
 import com.foxstream.app.ui.theme.OrangeSecondary
 import com.foxstream.app.ui.theme.DarkBackground
@@ -1421,6 +1430,23 @@ private fun applyVlcScaleMode(
             }
         }
     } catch (_: Exception) {}
+}
+
+@Composable
+fun LivePlayerAnimatedVisibility(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    enter: EnterTransition = fadeIn() + slideInVertically(),
+    exit: ExitTransition = fadeOut() + slideOutVertically(),
+    content: @Composable AnimatedVisibilityScope.() -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = enter,
+        exit = exit,
+        content = content
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -4761,11 +4787,12 @@ fun StaggeredEpisodeItem(
             content()
         }
     } else {
+        val density = LocalDensity.current.density
         val translateY = (1f - progress) * 18f
         Box(
             modifier = modifier.graphicsLayer {
-                this.alpha = progress
-                this.translationY = translateY * density
+                alpha = progress
+                translationY = translateY * density
             }
         ) {
             content()
@@ -6239,7 +6266,7 @@ fun BackdropChannelSearchCard(
                     .background(Color(0xFF0F111A)),
                 contentAlignment = Alignment.Center
             ) {
-                val imageUrl = channel.tvgLogo
+                val imageUrl = channel.logoUrl ?: channel.tvgLogo
                 if (imageUrl.isNullOrBlank()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.LiveTv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(36.dp))

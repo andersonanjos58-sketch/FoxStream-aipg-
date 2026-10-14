@@ -82,6 +82,21 @@ O repositório já possui a automação de CI/CD configurada em `.github/workflo
      - **Android & Lifecycle**: `Uri`, `ViewGroup`, `AndroidView`, `Lifecycle`, `LifecycleEventObserver`, `LocalLifecycleOwner`, `Job`
      - **Tema Global**: `OrangePrimary`, `DarkBackground`, etc.
 
+
+## 🔬 Diagnóstico e Resolução dos Erros do GitHub Actions (14/10/2026)
+
+| Erro Apontado | Causa Raiz Identificada | Correção Cirúrgica Aplicada |
+| :--- | :--- | :--- |
+| `AppNavTab` não resolvido em `Screens.kt` e `FoxStreamApp.kt:424` | `AppNavTab` está declarado no pacote `com.foxstream.app.ui`, mas `Screens.kt` (no pacote `com.foxstream.app.ui.screens`) não importava a classe enum. | Adicionado `import com.foxstream.app.ui.AppNavTab` em `Screens.kt`. O tipo do parâmetro `onNavigate: (AppNavTab) -> Unit` em `HomeScreen` agora resolve 100% em `FoxStreamApp.kt`. |
+| `SearchUtils` não resolvido | `SearchUtils` reside no pacote `com.foxstream.app.util`, e faltava o import em `Screens.kt`. | Adicionado `import com.foxstream.app.util.SearchUtils` em `Screens.kt`. |
+| `LivePlayerAnimatedVisibility` e erros de contexto `@Composable` | O wrapper de animação `LivePlayerAnimatedVisibility` havia sido removido em commit anterior, fazendo com que suas 4 chamadas fossem interpretadas como lambdas comuns fora de contexto Compose. | Restaurada a função `@Composable fun LivePlayerAnimatedVisibility(...)` com escopo `AnimatedVisibilityScope.() -> Unit` e transições `fadeIn() + slideInVertically()` / `fadeOut() + slideOutVertically()`. |
+| `tvgLogo` em `Screens.kt:6242` | O modelo `LiveChannel` define a propriedade como `logoUrl` (e não `tvgLogo`). | Atualizado o acesso para `channel.logoUrl ?: channel.tvgLogo` e adicionada propriedade de extensão `val LiveChannel.tvgLogo: String? get() = logoUrl` em `Models.kt`. |
+| `coverUrl` em `FoxStreamViewModel.kt` | O modelo `SeriesItem` define o pôster como `posterUrl` (e não `coverUrl`). | Atualizado para `series.posterUrl` e adicionada propriedade de extensão `val SeriesItem.coverUrl: String? get() = posterUrl` em `Models.kt`. |
+| `painterResource` e `R.drawable` | Faltavam os imports de recursos no topo de `Screens.kt`. | Adicionados `import androidx.compose.ui.res.painterResource` e `import com.foxstream.app.R`. |
+| `withContext` e `Dispatchers` | Faltavam os imports de corrotinas no topo de `Screens.kt`. | Adicionados `import kotlinx.coroutines.withContext` e `import kotlinx.coroutines.Dispatchers`. |
+| `graphicsLayer`, `verticalScroll` e `rememberScrollState` | Faltavam os imports no topo de `Screens.kt`. | Adicionados `import androidx.compose.ui.graphics.graphicsLayer`, `import androidx.compose.foundation.verticalScroll` e `import androidx.compose.foundation.rememberScrollState`. |
+| `this`, `alpha`, `translationY` e `density` em `graphicsLayer` (linha 4766) | Falta de import do modificador `graphicsLayer` e `density` não estava no escopo da lambda. | Obtido `val density = LocalDensity.current.density` antes do modificador e propriedades atribuídas diretamente via `alpha = progress` e `translationY = translateY * density`. |
+
 ## ✅ Status de Compilação
 - **TypeScript / React**: Compilado com 0 erros (`compile_applet`).
 - **Linter & Type Checking**: 100% aprovado (`tsc --noEmit`).
