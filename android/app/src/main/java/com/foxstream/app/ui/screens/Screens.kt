@@ -1,13 +1,3 @@
-
-fun cleanM3uTitle(raw: String): String {
-    if (raw.isBlank()) return "Título Desconhecido"
-    var res = raw.replace(Regex("""(?i)(4k|fhd|hd|sd|dual|dublado|legendado|1080p|720p|pts|★rc|rc)"""), "")
-    res = res.replace(Regex("""[\[\]\|\(\)]"""), " ")
-    res = res.replace(Regex("""\s+"""), " ").trim()
-    return if (res.isBlank()) raw else res
-}
-
-
 package com.foxstream.app.ui.screens
 
 import android.app.Activity
@@ -28,78 +18,55 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.common.PlaybackException
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.compose.ui.graphics.RectangleShape
-import org.videolan.libvlc.LibVLC
-import org.videolan.libvlc.MediaPlayer
-import org.videolan.libvlc.Media
-import org.videolan.libvlc.util.VLCVideoLayout
-import org.videolan.libvlc.interfaces.IVLCVout
-import android.view.ViewGroup
-import androidx.compose.ui.zIndex
-import android.net.Uri
-import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
-import com.foxstream.app.R
 import com.foxstream.app.data.model.*
-import com.foxstream.app.ui.AppNavTab
-import com.foxstream.app.ui.theme.OrangePrimary
-import com.foxstream.app.util.SearchUtils
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
+import java.text.SimpleDateFormat
+import java.util.*
+
+fun cleanM3uTitle(raw: String): String {
+    if (raw.isBlank()) return "Título Desconhecido"
+    var res = raw.replace(Regex("(?i)\\b(4k|fhd|hd|sd|dual|dublado|legendado|1080p|720p|pts|★rc|rc)\\b"), "")
+    res = res.replace(Regex("[\\[\\]\\|\\(\\)]"), " ")
+    res = res.replace(Regex("\\s+"), " ").trim()
+    return if (res.isBlank()) raw else res
+}
 
 
-// ==========================================
-// IMAGE CACHING AND LOADER COMPOSABLE
-// ==========================================
 @Composable
 fun CoilPosterImage(
     url: String?,
