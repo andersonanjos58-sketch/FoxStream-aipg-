@@ -97,6 +97,17 @@ O repositório já possui a automação de CI/CD configurada em `.github/workflo
 | `graphicsLayer`, `verticalScroll` e `rememberScrollState` | Faltavam os imports no topo de `Screens.kt`. | Adicionados `import androidx.compose.ui.graphics.graphicsLayer`, `import androidx.compose.foundation.verticalScroll` e `import androidx.compose.foundation.rememberScrollState`. |
 | `this`, `alpha`, `translationY` e `density` em `graphicsLayer` (linha 4766) | Falta de import do modificador `graphicsLayer` e `density` não estava no escopo da lambda. | Obtido `val density = LocalDensity.current.density` antes do modificador e propriedades atribuídas diretamente via `alpha = progress` e `translationY = translateY * density`. |
 
+
+### 🎬 Novo Design Compacto do BackdropCard (Tela de Busca)
+- **Altura Reduzida (21:9 Panorâmico)**:
+  - Imagem do banner/backdrop agora utiliza proporção panorâmica `21:9` em vez de `16:9`, reduzindo a altura do card em mais de 45% e permitindo visualizar com facilidade **2 a 3 cards simultaneamente na tela**.
+- **Overlay Discreto na Imagem (Sobreposição)**:
+  - Adicionado gradiente escuro vertical na base da imagem (`Brush.verticalGradient` transparente para preto 95%).
+  - **À Esquerda**: Título limpo em destaque (15sp, negrito) + linha de metadados compacta (ano, duração, nota).
+  - **À Direita**: Botão **"► Assistir"** compacto em laranja (`#FF6600`) com altura contida (`34dp`) e cantos arredondados (`10dp`), sem tomar a largura inteira do card.
+- **Barra Inferior Fina e Justa (Padding 7dp)**:
+  - Ações **[ ♡ Favoritos ]** e **[ ⓘ Detalhes ]** alinhadas em linha fina e elegante, com espaçamento reduzido e tipografia discreta.
+
 ## ✅ Status de Compilação
 - **TypeScript / React**: Compilado com 0 erros (`compile_applet`).
 - **Linter & Type Checking**: 100% aprovado (`tsc --noEmit`).
