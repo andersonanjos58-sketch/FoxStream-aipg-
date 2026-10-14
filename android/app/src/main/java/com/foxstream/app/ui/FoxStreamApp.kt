@@ -277,7 +277,7 @@ fun FoxStreamApp(
                             }
 
                             navTabs.forEach { tab ->
-                                val isSelected = currentTab == tab
+                                val isSelected = currentTab == tab && !showSearchScreen
                                 val interactionSource = remember { MutableInteractionSource() }
 
                                 Column(
@@ -288,6 +288,12 @@ fun FoxStreamApp(
                                             interactionSource = interactionSource,
                                             indication = null
                                         ) {
+                                            if (showSearchScreen) {
+                                                showSearchScreen = false
+                                                viewModel.onSearchQueryChanged("")
+                                            }
+                                            selectedMovieForDetails = null
+                                            selectedSeriesForDetails = null
                                             currentTab = tab
                                         },
                                     horizontalAlignment = Alignment.CenterHorizontally,

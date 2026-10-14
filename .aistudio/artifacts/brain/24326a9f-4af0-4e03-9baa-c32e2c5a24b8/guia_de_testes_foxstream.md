@@ -108,6 +108,17 @@ O repositório já possui a automação de CI/CD configurada em `.github/workflo
 - **Barra Inferior Fina e Justa (Padding 7dp)**:
   - Ações **[ ♡ Favoritos ]** e **[ ⓘ Detalhes ]** alinhadas em linha fina e elegante, com espaçamento reduzido e tipografia discreta.
 
+
+### ✨ Refinamentos Aplicados na Tela de Busca:
+1. **Remoção do Contêiner da Barra de Ações**:
+   - Barra inferior eliminada por completo dos cards de busca. A altura total do card agora é estritamente a área panorâmica 21:9 com cantos arredondados (`14dp`).
+2. **Card como Botão de Detalhes Completo**:
+   - O botão redundante "Detalhes" e o botão "Favoritos" foram removidos da busca.
+   - O card inteiro agora possui efeito de clique (`clickable(onClick = onOpenDetails)`), abrindo instantaneamente a tela de detalhes do título selecionado.
+   - O botão compacto **"► Assistir"** permanece em destaque na sobreposição no canto inferior direito para play imediato do stream.
+3. **Navegação nas Abas Inferiores com a Busca Aberta**:
+   - Corrigido o comportamento do menu inferior (`BottomNav` / `FoxStreamApp`): ao clicar em qualquer aba inferior (Início, Filmes, TV ao Vivo, Séries, Favoritos, etc.), o ambiente de busca fecha imediatamente (`showSearchScreen = false`) e a tela navega diretamente para a aba selecionada.
+
 ## ✅ Status de Compilação
 - **TypeScript / React**: Compilado com 0 erros (`compile_applet`).
 - **Linter & Type Checking**: 100% aprovado (`tsc --noEmit`).

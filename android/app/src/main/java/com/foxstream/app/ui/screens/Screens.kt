@@ -5987,9 +5987,9 @@ fun GlobalSearchScreen(
 @Composable
 fun BackdropMovieSearchCard(
     movie: MovieItem,
-    isFavorite: Boolean,
+    isFavorite: Boolean = false,
     onPlay: () -> Unit,
-    onToggleFavorite: () -> Unit,
+    onToggleFavorite: () -> Unit = {},
     onOpenDetails: () -> Unit
 ) {
     var isFindingStream by remember { mutableStateOf(false) }
@@ -6004,177 +6004,118 @@ fun BackdropMovieSearchCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp)),
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onOpenDetails),
         shape = RoundedCornerShape(14.dp),
         color = Color(0xFF131622),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         tonalElevation = 3.dp
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // 1. BANNER COM SOBREPOSIÇÃO (21:9 para altura reduzida e visual panorâmico moderno)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(21f / 9f)
-                    .background(Color(0xFF0F111A))
-            ) {
-                val imageUrl = movie.backdropUrl ?: movie.posterUrl
-                if (imageUrl.isNullOrBlank()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Movie, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
-                    }
-                } else {
-                    SubcomposeAsyncImage(
-                        model = imageUrl,
-                        contentDescription = cleanedTitle,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                        loading = {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = OrangePrimary, strokeWidth = 2.dp)
-                            }
-                        },
-                        error = {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Movie, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
-                            }
-                        }
-                    )
+        // BANNER COM SOBREPOSIÇÃO (21:9 - O card inteiro é a imagem com os controles embutidos)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(21f / 9f)
+                .background(Color(0xFF0F111A))
+        ) {
+            val imageUrl = movie.backdropUrl ?: movie.posterUrl
+            if (imageUrl.isNullOrBlank()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Movie, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
                 }
-
-                // Gradiente escuro na base da imagem
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.25f),
-                                    Color.Black.copy(alpha = 0.75f),
-                                    Color.Black.copy(alpha = 0.95f)
-                                ),
-                                startY = 0f
-                            )
-                        )
+            } else {
+                SubcomposeAsyncImage(
+                    model = imageUrl,
+                    contentDescription = cleanedTitle,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    loading = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = OrangePrimary, strokeWidth = 2.dp)
+                        }
+                    },
+                    error = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Movie, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
+                        }
+                    }
                 )
-
-                // Conteúdo Sobreposto (Alinhado na parte inferior)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // À Esquerda: Título oficial limpo + metadados
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 10.dp)
-                    ) {
-                        Text(
-                            text = cleanedTitle,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (metaText.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = metaText,
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.75f),
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    // À Direita: Botão "► Assistir" compacto em laranja (#FF6600)
-                    Button(
-                        enabled = !isFindingStream,
-                        onClick = {
-                            isFindingStream = true
-                            onPlay()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .height(34.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                    ) {
-                        if (isFindingStream) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(text = "Abrindo...", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        } else {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Assistir", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                    }
-                }
             }
 
-            // 2. BARRA DE AÇÕES INFERIOR COMPACTA (Padding vertical de 6dp a 8dp)
+            // Gradiente escuro na base da imagem
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.25f),
+                                Color.Black.copy(alpha = 0.75f),
+                                Color.Black.copy(alpha = 0.95f)
+                            ),
+                            startY = 0f
+                        )
+                    )
+            )
+
+            // Conteúdo Sobreposto (Alinhado na parte inferior)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0F1118))
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Ação: Favoritos
-                Row(
+                // À Esquerda: Título oficial limpo + metadados
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { onToggleFavorite() }
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .weight(1f)
+                        .padding(end = 10.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = null,
-                        tint = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Favoritos",
-                        fontSize = 11.sp,
-                        color = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.75f),
-                        fontWeight = FontWeight.Medium
+                        text = cleanedTitle,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    if (metaText.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = metaText,
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.width(14.dp))
-
-                // Ação: Detalhes
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { onOpenDetails() }
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // À Direita: Botão "► Assistir" compacto em laranja (#FF6600)
+                Button(
+                    enabled = !isFindingStream,
+                    onClick = {
+                        isFindingStream = true
+                        onPlay()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.height(34.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Detalhes",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontWeight = FontWeight.Medium
-                    )
+                    if (isFindingStream) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "Abrindo...", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    } else {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Assistir", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
                 }
             }
         }
@@ -6184,9 +6125,9 @@ fun BackdropMovieSearchCard(
 @Composable
 fun BackdropSeriesSearchCard(
     series: SeriesItem,
-    isFavorite: Boolean,
+    isFavorite: Boolean = false,
     onPlay: () -> Unit,
-    onToggleFavorite: () -> Unit,
+    onToggleFavorite: () -> Unit = {},
     onOpenDetails: () -> Unit
 ) {
     val cleanedTitle = cleanM3uTitle(series.name)
@@ -6200,167 +6141,108 @@ fun BackdropSeriesSearchCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp)),
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onOpenDetails),
         shape = RoundedCornerShape(14.dp),
         color = Color(0xFF131622),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         tonalElevation = 3.dp
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // 1. BANNER COM SOBREPOSIÇÃO (21:9 para altura reduzida e visual panorâmico moderno)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(21f / 9f)
-                    .background(Color(0xFF0F111A))
-            ) {
-                val imageUrl = series.backdropUrl ?: series.posterUrl
-                if (imageUrl.isNullOrBlank()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Tv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
-                    }
-                } else {
-                    SubcomposeAsyncImage(
-                        model = imageUrl,
-                        contentDescription = cleanedTitle,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                        loading = {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = OrangePrimary, strokeWidth = 2.dp)
-                            }
-                        },
-                        error = {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Tv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
-                            }
-                        }
-                    )
+        // BANNER COM SOBREPOSIÇÃO (21:9 - O card inteiro é a imagem com os controles embutidos)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(21f / 9f)
+                .background(Color(0xFF0F111A))
+        ) {
+            val imageUrl = series.backdropUrl ?: series.posterUrl
+            if (imageUrl.isNullOrBlank()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Tv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
                 }
-
-                // Gradiente escuro na base da imagem
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.25f),
-                                    Color.Black.copy(alpha = 0.75f),
-                                    Color.Black.copy(alpha = 0.95f)
-                                ),
-                                startY = 0f
-                            )
-                        )
+            } else {
+                SubcomposeAsyncImage(
+                    model = imageUrl,
+                    contentDescription = cleanedTitle,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    loading = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = OrangePrimary, strokeWidth = 2.dp)
+                        }
+                    },
+                    error = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Tv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
+                        }
+                    }
                 )
-
-                // Conteúdo Sobreposto (Alinhado na parte inferior)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // À Esquerda: Título oficial limpo + metadados
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 10.dp)
-                    ) {
-                        Text(
-                            text = cleanedTitle,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (metaText.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = metaText,
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.75f),
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    // À Direita: Botão "Episódios" compacto em laranja (#FF6600)
-                    Button(
-                        onClick = onOpenDetails,
-                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .height(34.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                    ) {
-                        Icon(Icons.Default.List, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Episódios", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-                }
             }
 
-            // 2. BARRA DE AÇÕES INFERIOR COMPACTA (Padding vertical de 6dp a 8dp)
+            // Gradiente escuro na base da imagem
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.25f),
+                                Color.Black.copy(alpha = 0.75f),
+                                Color.Black.copy(alpha = 0.95f)
+                            ),
+                            startY = 0f
+                        )
+                    )
+            )
+
+            // Conteúdo Sobreposto (Alinhado na parte inferior)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0F1118))
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Ação: Favoritos
-                Row(
+                // À Esquerda: Título oficial limpo + metadados
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { onToggleFavorite() }
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .weight(1f)
+                        .padding(end = 10.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = null,
-                        tint = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Favoritos",
-                        fontSize = 11.sp,
-                        color = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.75f),
-                        fontWeight = FontWeight.Medium
+                        text = cleanedTitle,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    if (metaText.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = metaText,
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.width(14.dp))
-
-                // Ação: Detalhes
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { onOpenDetails() }
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // À Direita: Botão "Episódios" compacto em laranja (#FF6600)
+                Button(
+                    onClick = onOpenDetails,
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.height(34.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Icon(Icons.Default.List, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Detalhes",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontWeight = FontWeight.Medium
-                    )
+                    Text(text = "Episódios", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }
@@ -6370,7 +6252,7 @@ fun BackdropSeriesSearchCard(
 @Composable
 fun BackdropChannelSearchCard(
     channel: LiveChannel,
-    isFavorite: Boolean,
+    isFavorite: Boolean = false,
     onPlay: () -> Unit
 ) {
     val cleanedTitle = cleanM3uTitle(channel.name)
@@ -6379,148 +6261,117 @@ fun BackdropChannelSearchCard(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp)),
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onPlay),
         shape = RoundedCornerShape(14.dp),
         color = Color(0xFF131622),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
         tonalElevation = 3.dp
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // 1. BANNER COM SOBREPOSIÇÃO (21:9 para altura reduzida)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(21f / 9f)
-                    .background(Color(0xFF0F111A)),
-                contentAlignment = Alignment.Center
-            ) {
-                val imageUrl = channel.logoUrl ?: channel.tvgLogo
-                if (imageUrl.isNullOrBlank()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.LiveTv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
-                    }
-                } else {
-                    SubcomposeAsyncImage(
-                        model = imageUrl,
-                        contentDescription = cleanedTitle,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(12.dp),
-                        contentScale = ContentScale.Fit,
-                        loading = {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = OrangePrimary, strokeWidth = 2.dp)
-                            }
-                        },
-                        error = {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.LiveTv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
-                            }
-                        }
-                    )
+        // BANNER COM SOBREPOSIÇÃO (21:9 - O card inteiro é a imagem com os controles embutidos)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(21f / 9f)
+                .background(Color(0xFF0F111A)),
+            contentAlignment = Alignment.Center
+        ) {
+            val imageUrl = channel.logoUrl ?: channel.tvgLogo
+            if (imageUrl.isNullOrBlank()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.LiveTv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
                 }
-
-                // Gradiente escuro na base da imagem
-                Box(
+            } else {
+                SubcomposeAsyncImage(
+                    model = imageUrl,
+                    contentDescription = cleanedTitle,
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.3f),
-                                    Color.Black.copy(alpha = 0.8f),
-                                    Color.Black.copy(alpha = 0.95f)
-                                ),
-                                startY = 0f
-                            )
-                        )
-                )
-
-                // Conteúdo Sobreposto (Alinhado na base)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 10.dp)
-                    ) {
-                        Text(
-                            text = cleanedTitle,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = channel.category.ifBlank { "Ao Vivo" },
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Button(
-                        enabled = !isFindingStream,
-                        onClick = {
-                            isFindingStream = true
-                            onPlay()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .height(34.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                    ) {
-                        if (isFindingStream) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(text = "Abrindo...", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        } else {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Ao Vivo", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        .padding(12.dp),
+                    contentScale = ContentScale.Fit,
+                    loading = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = OrangePrimary, strokeWidth = 2.dp)
+                        }
+                    },
+                    error = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.LiveTv, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
                         }
                     }
-                }
+                )
             }
 
-            // 2. BARRA DE AÇÕES INFERIOR COMPACTA (Padding vertical de 6dp a 8dp)
+            // Gradiente escuro na base da imagem
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.3f),
+                                Color.Black.copy(alpha = 0.8f),
+                                Color.Black.copy(alpha = 0.95f)
+                            ),
+                            startY = 0f
+                        )
+                    )
+            )
+
+            // Conteúdo Sobreposto (Alinhado na base)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0F1118))
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
+                Column(
                     modifier = Modifier
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .weight(1f)
+                        .padding(end = 10.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = null,
-                        tint = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (isFavorite) "Favorito" else "Canal de TV",
-                        fontSize = 11.sp,
-                        color = if (isFavorite) OrangePrimary else Color.White.copy(alpha = 0.75f),
-                        fontWeight = FontWeight.Medium
+                        text = cleanedTitle,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = channel.category.ifBlank { "Ao Vivo" },
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Button(
+                    enabled = !isFindingStream,
+                    onClick = {
+                        isFindingStream = true
+                        onPlay()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.height(34.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                ) {
+                    if (isFindingStream) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "Abrindo...", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    } else {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Ao Vivo", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
                 }
             }
         }

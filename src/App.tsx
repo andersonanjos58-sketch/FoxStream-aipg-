@@ -650,7 +650,12 @@ export default function App() {
       {/* Bottom Navigation for Mobile & Handheld Android */}
       <BottomNav
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={(tab) => {
+          setIsSearchOpen(false);
+          setSelectedMovie(null);
+          setSelectedSeries(null);
+          setCurrentTab(tab);
+        }}
         favoriteCount={favorites.length}
       />
 
