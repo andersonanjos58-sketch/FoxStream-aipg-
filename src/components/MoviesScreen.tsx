@@ -23,6 +23,7 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
   const [selectedCategoryForGrid, setSelectedCategoryForGrid] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [visibleLimit, setVisibleLimit] = useState<number>(60);
+  const [visibleCategoriesCount, setVisibleCategoriesCount] = useState<number>(8);
   const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState<number>(0);
   const [isFeaturedPaused, setIsFeaturedPaused] = useState<boolean>(false);
 
@@ -89,7 +90,8 @@ export const MoviesScreen: React.FC<MoviesScreenProps> = ({
   // Reset pagination when category changes
   useEffect(() => {
     setVisibleLimit(60);
-  }, [selectedCategoryForGrid]);
+    setVisibleCategoriesCount(8);
+  }, [selectedCategoryForGrid, searchQuery]);
 
   // Infinite scroll for category grid view
   useEffect(() => {
@@ -509,7 +511,7 @@ const MovieCategoryCarousel: React.FC<MovieCategoryCarouselProps> = ({
         ref={scrollRef}
         className="flex items-center gap-3 sm:gap-4 overflow-x-auto no-scrollbar pb-2 pt-1"
       >
-        {movies.map((movie) => (
+        {movies.slice(0, 24).map((movie) => (
           <div key={`carousel_movie_${movie.id}`} className="shrink-0 w-32 sm:w-44">
             <MovieCard
               movie={movie}

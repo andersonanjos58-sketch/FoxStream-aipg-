@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, Maximize2, Minimize2, ExternalLink, RefreshCw, X, AlertTriangle, Tv } from 'lucide-react';
+import { Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, Maximize2, Minimize2, ExternalLink, RefreshCw, X, AlertTriangle, Tv, Copy, Check, Download } from 'lucide-react';
 import Hls from 'hls.js';
 import { PlaybackIntentOptions, PlaybackService } from '../services/playbackService';
 import { StorageService } from '../services/storageService';
@@ -43,6 +43,19 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({
   const [isPipSupported, setIsPipSupported] = useState(false);
   const [isPipActive, setIsPipActive] = useState(false);
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLink = () => {
+    if (finalStreamUrl) {
+      navigator.clipboard.writeText(finalStreamUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  };
+
+  const handleDownloadM3u = () => {
+    PlaybackService.downloadLauncherM3U(finalTitle, finalStreamUrl);
+  };
 
   useEffect(() => {
     const video = videoRef.current;
@@ -649,12 +662,22 @@ export const InternalPlayer: React.FC<InternalPlayerProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Copy Link Button */}
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                title="Copiar link do stream"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 hover:text-white text-[11px] font-semibold transition-all active:scale-95 cursor-pointer"
+              >
+                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-neutral-400" />}
+                <span className="hidden sm:inline">{copied ? "Copiado!" : "Copiar"}</span>
+              </button>
               {/* VlC Intent Trigger Button */}
               <button
                 type="button"
                 onClick={handleOpenInVlc}
                 title="Abrir no aplicativo VLC Media Player"
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 hover:text-white text-[11px] font-semibold transition-all active:scale-95"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 hover:text-white text-[11px] font-semibold transition-all active:scale-95 cursor-pointer"
               >
                 <ExternalLink className="w-3 h-3" />
                 <span className="hidden sm:inline">Abrir no VLC</span>

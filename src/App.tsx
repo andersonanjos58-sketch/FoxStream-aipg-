@@ -34,16 +34,6 @@ import { evaluateSmartMatch } from './services/tmdbService';
 export default function App() {
   // Navigation
   const [currentTab, setCurrentTab] = useState<NavTab>('home');
-  const [visitedTabs, setVisitedTabs] = useState<Set<NavTab>>(() => new Set(['home']));
-
-  useEffect(() => {
-    setVisitedTabs(prev => {
-      if (prev.has(currentTab)) return prev;
-      const next = new Set(prev);
-      next.add(currentTab);
-      return next;
-    });
-  }, [currentTab]);
 
   // Playlists & Content Data
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -534,10 +524,10 @@ export default function App() {
         isRefreshing={!!refreshingPlaylistId}
       />
 
-      {/* Main Screen Views with Keep-Alive to eliminate tab switching stutter */}
+            {/* Main Screen Views with Zero-Lag Single Tab Rendering */}
       <main className="flex-1 w-full">
-        {visitedTabs.has('home') && (
-          <div className={currentTab === 'home' ? 'w-full' : 'hidden'}>
+        {currentTab === 'home' && (
+          <div className="w-full">
             <HomeScreen
               activePlaylist={activePlaylist}
               history={history}
@@ -555,9 +545,8 @@ export default function App() {
             />
           </div>
         )}
-
-        {visitedTabs.has('live') && (
-          <div className={currentTab === 'live' ? 'w-full' : 'hidden'}>
+        {currentTab === 'live' && (
+          <div className="w-full">
             <LiveTvScreen
               channels={channels}
               onPlayChannel={handlePlayChannel}
@@ -570,9 +559,8 @@ export default function App() {
             />
           </div>
         )}
-
-        {visitedTabs.has('movies') && (
-          <div className={currentTab === 'movies' ? 'w-full' : 'hidden'}>
+        {currentTab === 'movies' && (
+          <div className="w-full">
             <MoviesScreen
               movies={movies}
               onSelectMovie={setSelectedMovie}
@@ -583,9 +571,8 @@ export default function App() {
             />
           </div>
         )}
-
-        {visitedTabs.has('series') && (
-          <div className={currentTab === 'series' ? 'w-full' : 'hidden'}>
+        {currentTab === 'series' && (
+          <div className="w-full">
             <SeriesScreen
               series={series}
               onSelectSeries={setSelectedSeries}
@@ -596,9 +583,8 @@ export default function App() {
             />
           </div>
         )}
-
-        {visitedTabs.has('favorites') && (
-          <div className={currentTab === 'favorites' ? 'w-full' : 'hidden'}>
+        {currentTab === 'favorites' && (
+          <div className="w-full">
             <FavoritesScreen
               favorites={favorites}
               channels={channels}
@@ -615,9 +601,8 @@ export default function App() {
             />
           </div>
         )}
-
-        {visitedTabs.has('playlists') && (
-          <div className={currentTab === 'playlists' ? 'w-full' : 'hidden'}>
+        {currentTab === 'playlists' && (
+          <div className="w-full">
             <PlaylistsScreen
               playlists={playlists}
               activePlaylistId={activePlaylistId}
@@ -630,9 +615,8 @@ export default function App() {
             />
           </div>
         )}
-
-        {visitedTabs.has('settings') && (
-          <div className={currentTab === 'settings' ? 'w-full' : 'hidden'}>
+        {currentTab === 'settings' && (
+          <div className="w-full">
             <SettingsScreen
               onNavigatePlaylists={() => setCurrentTab('playlists')}
               onRefreshAll={async () => {
@@ -646,7 +630,6 @@ export default function App() {
           </div>
         )}
       </main>
-
       {/* Bottom Navigation for Mobile & Handheld Android */}
       <BottomNav
         currentTab={currentTab}

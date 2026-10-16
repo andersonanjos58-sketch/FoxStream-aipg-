@@ -1699,10 +1699,12 @@ fun LiveTvScreen(
                     addOption(":mediacodec")
                     addOption(":mediacodec-dr")
                     addOption(":sout-keep")
+                    addOption(":network-caching=5000")
+                    addOption(":live-caching=3000")
+                    addOption(":file-caching=3000")
+                    addOption(":reconnect")
                     addOption(":http-reconnect=1")
-                    addOption(":network-caching=1200")
-                    addOption(":live-caching=1200")
-                    addOption(":file-caching=1000")
+                    addOption(":http-continuous")
                     addOption(":clock-jitter=0")
                     addOption(":clock-synchro=0")
                     addOption(":drop-late-frames")
@@ -1711,10 +1713,6 @@ fun LiveTvScreen(
                     addOption(":http-referrer=")
                     addOption(":no-sub-autodetect-file")
                 }
-                try {
-                    media.parseAsync()
-                } catch (_: Exception) {}
-
                 vlcMediaPlayer.media = media
                 media.release()
 

@@ -26,6 +26,7 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
   const [selectedCategoryForGrid, setSelectedCategoryForGrid] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [visibleLimit, setVisibleLimit] = useState<number>(60);
+  const [visibleCategoriesCount, setVisibleCategoriesCount] = useState<number>(8);
   const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState<number>(0);
   const [isFeaturedPaused, setIsFeaturedPaused] = useState<boolean>(false);
 
@@ -92,7 +93,8 @@ export const SeriesScreen: React.FC<SeriesScreenProps> = ({
   // Reset pagination when category changes
   useEffect(() => {
     setVisibleLimit(60);
-  }, [selectedCategoryForGrid]);
+    setVisibleCategoriesCount(8);
+  }, [selectedCategoryForGrid, searchQuery]);
 
   // Infinite scroll for category grid view
   useEffect(() => {
@@ -512,7 +514,7 @@ const SeriesCategoryCarousel: React.FC<SeriesCategoryCarouselProps> = ({
         ref={scrollRef}
         className="flex items-center gap-3 sm:gap-4 overflow-x-auto no-scrollbar pb-2 pt-1"
       >
-        {seriesList.map((s) => (
+        {seriesList.slice(0, 24).map((s) => (
           <div key={`carousel_series_${s.id}`} className="shrink-0 w-32 sm:w-44">
             <SeriesCard
               series={s}

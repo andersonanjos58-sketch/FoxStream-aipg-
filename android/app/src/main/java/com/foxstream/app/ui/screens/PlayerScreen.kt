@@ -314,10 +314,12 @@ fun PlayerScreen(
                     setHWDecoderEnabled(true, false)
                     addOption(":codec=mediacodec,iomx,all")
                     addOption(":sout-keep")
+                    addOption(":network-caching=5000")
+                    addOption(":live-caching=3000")
+                    addOption(":file-caching=3000")
+                    addOption(":reconnect")
                     addOption(":http-reconnect=1")
-                    addOption(":network-caching=1200")
-                    addOption(":live-caching=1200")
-                    addOption(":file-caching=1000")
+                    addOption(":http-continuous")
                     addOption(":clock-jitter=0")
                     addOption(":clock-synchro=0")
                     addOption(":drop-late-frames")
@@ -326,9 +328,6 @@ fun PlayerScreen(
                     addOption(":http-referrer=")
                     addOption(":no-sub-autodetect-file")
                 }
-                try {
-                    media.parseAsync()
-                } catch (_: Exception) {}
                 vlcMediaPlayer.media = media
                 media.release()
                 if (vlcMediaPlayer.vlcVout.areViewsAttached()) {
@@ -489,11 +488,23 @@ fun PlayerScreen(
         vlcMediaPlayer.setEventListener(listener)
 
         onDispose {
-            vlcMediaPlayer.setEventListener(null)
-            vlcMediaPlayer.stop()
-            vlcMediaPlayer.detachViews()
-            vlcMediaPlayer.release()
-            libVLC.release()
+            try {
+                vlcMediaPlayer.setEventListener(null)
+            } catch (_: Throwable) {}
+            try {
+                vlcMediaPlayer.stop()
+            } catch (_: Throwable) {}
+            try {
+                if (vlcMediaPlayer.vlcVout.areViewsAttached()) {
+                    vlcMediaPlayer.detachViews()
+                }
+            } catch (_: Throwable) {}
+            try {
+                vlcMediaPlayer.release()
+            } catch (_: Throwable) {}
+            try {
+                libVLC.release()
+            } catch (_: Throwable) {}
         }
     }
 
@@ -1068,10 +1079,20 @@ fun PlayerScreen(
                         if (contentType != ContentType.LIVE) {
                             IconButton(
                                 onClick = {
+                                    val currentTime = if (useVlc) vlcMediaPlayer.time else exoPlayer.currentPosition
+                                    val safeTime = (currentTime - 10000).coerceAtLeast(0L)
                                     if (useVlc) {
-                                        vlcMediaPlayer.time = (vlcMediaPlayer.time - 10000).coerceAtLeast(0)
+                                        try {
+                                            vlcMediaPlayer.time = safeTime
+                                            currentPosition = safeTime
+                                            lastValidPosition = safeTime
+                                        } catch (_: Throwable) {}
                                     } else {
-                                        exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0))
+                                        try {
+                                            exoPlayer.seekTo(safeTime)
+                                            currentPosition = safeTime
+                                            lastValidPosition = safeTime
+                                        } catch (_: Throwable) {}
                                     }
                                 },
                                 modifier = Modifier.size(56.dp)
@@ -1114,10 +1135,20 @@ fun PlayerScreen(
                         if (contentType != ContentType.LIVE) {
                             IconButton(
                                 onClick = {
+                                    val currentTime = if (useVlc) vlcMediaPlayer.time else exoPlayer.currentPosition
+                                    val safeTime = if (duration > 0) (currentTime + 10000).coerceAtMost(duration) else (currentTime + 10000)
                                     if (useVlc) {
-                                        vlcMediaPlayer.time = (vlcMediaPlayer.time + 10000).coerceAtMost(duration)
+                                        try {
+                                            vlcMediaPlayer.time = safeTime
+                                            currentPosition = safeTime
+                                            lastValidPosition = safeTime
+                                        } catch (_: Throwable) {}
                                     } else {
-                                        exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(duration))
+                                        try {
+                                            exoPlayer.seekTo(safeTime)
+                                            currentPosition = safeTime
+                                            lastValidPosition = safeTime
+                                        } catch (_: Throwable) {}
                                     }
                                 },
                                 modifier = Modifier.size(56.dp)

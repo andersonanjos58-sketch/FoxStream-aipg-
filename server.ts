@@ -244,7 +244,19 @@ async function startServer() {
       console.log(`[Proxy Response] Target URL: ${targetUrl} -> Status: ${response.status}, Content-Type: ${response.headers.get('content-type')}`);
 
       const contentType = response.headers.get('content-type') || '';
-      const isM3u8 = contentType.includes('mpegurl') || contentType.includes('mpegURL') || targetUrl.includes('.m3u8');
+      let isM3u8 = contentType.includes('mpegurl') || contentType.includes('mpegURL') || targetUrl.includes('.m3u8');
+
+      let textBody = '';
+      if (!isM3u8 && (!contentType.includes('video') && !contentType.includes('audio') && !contentType.includes('octet-stream'))) {
+        try {
+          const cloned = response.clone();
+          const sample = await cloned.text();
+          if (sample.trim().startsWith('#EXTM3U') || sample.includes('#EXTINF') || sample.includes('#EXT-X-STREAM-INF')) {
+            isM3u8 = true;
+            textBody = sample;
+          }
+        } catch {}
+      }
 
       // Set CORS headers
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -253,7 +265,7 @@ async function startServer() {
 
       if (isM3u8) {
         // M3U8 Playlist: read as text, rewrite relative and absolute paths to proxy URLs
-        const text = await response.text();
+        const text = textBody || await response.text();
         const proxyBase = `${req.protocol}://${req.get('host')}`;
         const finalUrl = response.url || targetUrl;
 
