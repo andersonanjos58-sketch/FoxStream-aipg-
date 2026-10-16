@@ -152,7 +152,7 @@ fun PlayerScreen(
     val libVLC = remember {
         val options = ArrayList<String>().apply {
             add("--http-reconnect")
-            add("--network-caching=5000") // 5 seconds cache
+            add("--network-caching=2000") // 2s default cache
             add("-vvv") // Debug logs
         }
         val instance = LibVLC(context, options)
@@ -310,16 +310,21 @@ fun PlayerScreen(
 
                 // Setup and Play VLC with hardware decoding
                 android.util.Log.d("FoxStreamPlayer", "Inicializando reprodução libVLC com aceleração de hardware para: $cleanedUrl")
+                val isLive = contentType == ContentType.LIVE
                 val media = Media(libVLC, Uri.parse(cleanedUrl)).apply {
                     setHWDecoderEnabled(true, false)
                     addOption(":codec=mediacodec,iomx,all")
-                    addOption(":sout-keep")
-                    addOption(":network-caching=5000")
-                    addOption(":live-caching=3000")
-                    addOption(":file-caching=3000")
-                    addOption(":reconnect")
-                    addOption(":http-reconnect=1")
-                    addOption(":http-continuous")
+                    if (isLive) {
+                        addOption(":network-caching=3000")
+                        addOption(":live-caching=3000")
+                        addOption(":file-caching=3000")
+                        addOption(":http-reconnect=1")
+                    } else {
+                        // VOD (Filmes e Séries): abertura instantânea, suporte a Range requests e busca ágil
+                        addOption(":network-caching=1500")
+                        addOption(":file-caching=1500")
+                        addOption(":http-reconnect=1")
+                    }
                     addOption(":clock-jitter=0")
                     addOption(":clock-synchro=0")
                     addOption(":drop-late-frames")
@@ -330,9 +335,9 @@ fun PlayerScreen(
                 }
                 vlcMediaPlayer.media = media
                 media.release()
-                if (vlcMediaPlayer.vlcVout.areViewsAttached()) {
+                try {
                     vlcMediaPlayer.play()
-                }
+                } catch (_: Exception) {}
                 isPlaying = true
                 playbackState = Player.STATE_BUFFERING
             } else {
