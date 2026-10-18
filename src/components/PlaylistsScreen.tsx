@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Plus, RefreshCw, Trash2, CheckCircle2, Server, FileText, 
   Tv, Film, Clapperboard, Calendar, Edit2, Check, X, AlertTriangle, ArrowRight,
-  Layers, ChevronDown, ChevronUp
+  Layers, ChevronDown, ChevronUp, Sparkles
 } from 'lucide-react';
 import { Playlist } from '../types';
 
@@ -113,11 +113,15 @@ export const PlaylistsScreen: React.FC<PlaylistsScreenProps> = ({
                       className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
                         playlist.type === 'xtream'
                           ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                          : playlist.type === 'addon_json'
+                          ? 'bg-purple-500/10 border-purple-500/30 text-purple-400'
                           : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                       }`}
                     >
                       {playlist.type === 'xtream' ? (
                         <Server className="w-6 h-6" />
+                      ) : playlist.type === 'addon_json' ? (
+                        <Sparkles className="w-6 h-6" />
                       ) : (
                         <FileText className="w-6 h-6" />
                       )}
@@ -180,7 +184,11 @@ export const PlaylistsScreen: React.FC<PlaylistsScreenProps> = ({
                       {/* Type & Date */}
                       <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400 mt-1">
                         <span className="font-semibold text-neutral-300">
-                          {playlist.type === 'xtream' ? 'Xtream / XC API' : 'M3U Playlist'}
+                          {playlist.type === 'xtream'
+                            ? 'Xtream / XC API'
+                            : playlist.type === 'addon_json'
+                            ? 'Add-on JSON / Manifesto'
+                            : 'M3U Playlist'}
                         </span>
                         <span>•</span>
                         <span className="flex items-center gap-1 text-[11px]">

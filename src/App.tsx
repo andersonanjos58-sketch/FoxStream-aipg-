@@ -17,19 +17,23 @@ import { AddPlaylistScreen } from './components/AddPlaylistScreen';
 import { SearchModal } from './components/SearchModal';
 import { MovieDetailsModal } from './components/MovieDetailsModal';
 import { SeriesDetailsModal } from './components/SeriesDetailsModal';
+import { EnrichedDetailsModal } from './components/EnrichedDetailsModal';
+import { VideoPlayer } from './components/VideoPlayer';
 import { InternalPlayer } from './components/InternalPlayer';
 import { AndroidSourceModal } from './components/AndroidSourceModal';
 import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 
 import { 
   Playlist, LiveChannel, MovieItem, SeriesItem, 
-  HistoryItem, FavoriteItem, ContentType, EpisodeItem 
+  HistoryItem, FavoriteItem, ContentType, EpisodeItem,
+  ActivePlaybackPayload
 } from './types';
 import { StorageService } from './services/storageService';
 import { PlaybackService } from './services/playbackService';
 import { parseM3U } from './services/m3uParser';
 import { XtreamClient } from './services/xtreamClient';
 import { evaluateSmartMatch } from './services/tmdbService';
+import { StreamResolverService } from './services/streamResolver';
 
 export default function App() {
   // Navigation
@@ -52,6 +56,17 @@ export default function App() {
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState<boolean>(false);
   const [selectedMovie, setSelectedMovie] = useState<MovieItem | null>(null);
   const [selectedSeries, setSelectedSeries] = useState<SeriesItem | null>(null);
+  const [selectedTmdbMedia, setSelectedTmdbMedia] = useState<{
+    id: number | string;
+    mediaType: 'movie' | 'tv';
+    title: string;
+    poster?: string;
+    backdrop?: string;
+    year?: string;
+    rating?: string;
+    overview?: string;
+  } | null>(null);
+  const [activePlayback, setActivePlayback] = useState<ActivePlaybackPayload | null>(null);
 
   // Toast Notification (replaces unsafe window.alert)
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -182,6 +197,17 @@ export default function App() {
   const handleSelectPlaylist = (id: string) => {
     setActivePlaylistId(id);
     StorageService.setActivePlaylistId(id);
+    const target = playlists.find(p => p.id === id);
+    if (target && target.type === 'addon_json') {
+      StorageService.setActiveSourceMode('addon_json');
+      if (target.addonUrl) {
+        StorageService.setActiveAddonUrl(target.addonUrl);
+      }
+      StreamResolverService.clearCache();
+      showToast('Modo Manifesto Add-on ativado! Vitrine TMDB conectada.', 'success');
+    } else {
+      StorageService.setActiveSourceMode('playlist');
+    }
     reloadContent(id);
   };
 
@@ -216,6 +242,28 @@ export default function App() {
     StorageService.addToHistory(historyItem);
     setHistory(StorageService.getHistory());
   }, [fixXtreamStreamUrl]);
+
+  // Play an On-Demand Matched Media from TMDB Showcase
+  const handlePlayActivePlayback = (payload: ActivePlaybackPayload) => {
+    setSelectedTmdbMedia(null);
+    setSelectedMovie(null);
+    setSelectedSeries(null);
+    setActivePlayback(payload);
+
+    // Save to history for continue watching
+    const historyItem: Omit<HistoryItem, 'id' | 'playedAt'> = {
+      contentId: String(payload.tmdbId),
+      title: payload.title,
+      type: payload.type || 'movie',
+      posterUrl: payload.posterPath || payload.backdropPath,
+      timestamp: Date.now(),
+      streamUrl: payload.streamUrl,
+      seriesName: payload.seriesName,
+      seasonEpisode: payload.seasonEpisode,
+    };
+    StorageService.addToHistory(historyItem);
+    setHistory(StorageService.getHistory());
+  };
 
   // Play a Movie
   const handlePlayMovie = (movie: MovieItem) => {
@@ -358,6 +406,14 @@ export default function App() {
     setPlaylists(updated);
     setActivePlaylistId(newPlaylist.id);
     StorageService.setActivePlaylistId(newPlaylist.id);
+    if (newPlaylist.type === 'addon_json') {
+      StorageService.setActiveSourceMode('addon_json');
+      if (newPlaylist.addonUrl) {
+        StorageService.setActiveAddonUrl(newPlaylist.addonUrl);
+      }
+      StreamResolverService.clearCache();
+      showToast('Manifesto Add-on conectado com sucesso!', 'success');
+    }
     reloadContent(newPlaylist.id);
     setIsAddPlaylistOpen(false);
     setCurrentTab('home');
@@ -418,6 +474,21 @@ export default function App() {
         };
         playlist.lastUpdated = new Date().toISOString();
         StorageService.savePlaylist(playlist);
+      } else if (playlist.type === 'addon_json') {
+        StreamResolverService.clearCache();
+        if (playlist.addonUrl) {
+          StorageService.setActiveAddonUrl(playlist.addonUrl);
+        }
+        StorageService.setActiveSourceMode('addon_json');
+        const streams = await StreamResolverService.loadStreams(true);
+        playlist.stats = {
+          liveCount: streams.filter(s => s.type === 'live').length,
+          movieCount: streams.filter(s => s.type === 'movie').length,
+          seriesCount: streams.filter(s => s.type === 'series').length,
+          otherCount: 0
+        };
+        playlist.lastUpdated = new Date().toISOString();
+        StorageService.savePlaylist(playlist);
       }
 
       setPlaylists(StorageService.getPlaylists());
@@ -446,6 +517,14 @@ export default function App() {
   // Delete playlist
   const handleDeletePlaylist = async (id: string) => {
     try {
+      const target = playlists.find(p => p.id === id);
+      if (target && target.type === 'addon_json') {
+        const activeAddon = StorageService.getActiveAddonUrl();
+        if (activeAddon === target.addonUrl) {
+          StorageService.resetActiveAddon();
+          StreamResolverService.clearCache();
+        }
+      }
       await StorageService.deletePlaylist(id);
       const updated = StorageService.getPlaylists();
       setPlaylists(updated);
@@ -542,6 +621,7 @@ export default function App() {
               onRemoveHistoryItem={handleRemoveHistory}
               onNavigateTab={setCurrentTab}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
+              onSelectTmdbMedia={setSelectedTmdbMedia}
             />
           </div>
         )}
@@ -568,6 +648,7 @@ export default function App() {
               isFavorite={isFavorite}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
               onOpenSearch={() => { setSearchScope('MOVIE'); setIsSearchOpen(true); }}
+              onSelectTmdbMedia={setSelectedTmdbMedia}
             />
           </div>
         )}
@@ -580,6 +661,7 @@ export default function App() {
               isFavorite={isFavorite}
               onOpenAddPlaylist={() => setIsAddPlaylistOpen(true)}
               onOpenSearch={() => { setSearchScope('SERIES'); setIsSearchOpen(true); }}
+              onSelectTmdbMedia={setSelectedTmdbMedia}
             />
           </div>
         )}
@@ -637,6 +719,7 @@ export default function App() {
           setIsSearchOpen(false);
           setSelectedMovie(null);
           setSelectedSeries(null);
+          setSelectedTmdbMedia(null);
           setCurrentTab(tab);
         }}
         favoriteCount={favorites.length}
@@ -661,6 +744,34 @@ export default function App() {
           onSelectMovie={setSelectedMovie}
           onSelectSeries={setSelectedSeries}
           searchScope={searchScope}
+          onSelectTmdbMedia={setSelectedTmdbMedia}
+        />
+      )}
+
+      {/* TMDB Enriched Details Modal with On-Demand Stream Matching */}
+      {selectedTmdbMedia && (
+        <EnrichedDetailsModal
+          mediaId={selectedTmdbMedia.id}
+          mediaType={selectedTmdbMedia.mediaType}
+          initialTitle={selectedTmdbMedia.title}
+          initialPoster={selectedTmdbMedia.poster}
+          initialBackdrop={selectedTmdbMedia.backdrop}
+          initialYear={selectedTmdbMedia.year}
+          initialRating={selectedTmdbMedia.rating}
+          initialOverview={selectedTmdbMedia.overview}
+          isFavorite={isFavorite(String(selectedTmdbMedia.id))}
+          onClose={() => setSelectedTmdbMedia(null)}
+          onPlay={handlePlayActivePlayback}
+          onToggleFavorite={(item) =>
+            handleToggleFavorite(
+              {
+                id: String(item.id),
+                name: item.title,
+                posterUrl: (item as any).posterPath,
+              },
+              selectedTmdbMedia.mediaType === 'tv' ? 'series' : 'movie'
+            )
+          }
         />
       )}
 
@@ -685,6 +796,19 @@ export default function App() {
           playlists={playlists}
           onUpdateSeries={handleUpdateSeries}
         />
+      )}
+
+      {/* Native Video Player Overlay for On-Demand Streams */}
+      {activePlayback && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-2xl flex items-center justify-center p-0 sm:p-4 md:p-8 animate-in fade-in duration-200">
+          <div className="w-full max-w-6xl h-full max-h-[92vh] flex flex-col justify-center">
+            <VideoPlayer
+              payload={activePlayback}
+              autoPlay={true}
+              onClose={() => setActivePlayback(null)}
+            />
+          </div>
+        </div>
       )}
 
       {playbackDialog.isOpen && (

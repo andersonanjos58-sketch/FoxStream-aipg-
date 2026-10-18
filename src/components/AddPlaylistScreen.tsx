@@ -1,21 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileText, Server, Upload, Link2, CheckCircle2, AlertCircle, 
-  Loader2, ArrowRight, ShieldCheck, Sparkles, X, Tv, Film, Clapperboard, Layers
+  Loader2, ArrowRight, ShieldCheck, Sparkles, X, Tv, Film, Clapperboard, Layers,
+  RotateCcw, Globe
 } from 'lucide-react';
-import { Playlist, PlaylistType } from '../types';
+import { Playlist, PlaylistType, StreamSource } from '../types';
 import { parseM3U, isHtmlContent, validateM3UContent, ParseResult } from '../services/m3uParser';
 import { XtreamClient, XtreamConnectionResult } from '../services/xtreamClient';
 import { StorageService } from '../services/storageService';
+import { StreamResolverService, parseFlexibleJsonManifest } from '../services/streamResolver';
 
-// The 6 connection options explicitly requested by the user
-export type MethodChoice = 
-  | 'm3u' 
-  | 'metodo3' 
-  | 'xc_api' 
-  | 'xtream' 
-  | 'xtream_codes' 
-  | 'xstream_account';
+// 3-option selector: M3U | Xtream Codes | Add-on JSON
+export type MethodChoice = 'm3u' | 'xtream' | 'addon_json';
 
 interface AddPlaylistScreenProps {
   onSuccess: (playlist: Playlist) => void;
@@ -32,11 +28,22 @@ export const AddPlaylistScreen: React.FC<AddPlaylistScreenProps> = ({ onSuccess,
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
 
-  // Xtream Codes / XC API form state
+  // Xtream Codes form state
   const [xtreamName, setXtreamName] = useState('');
   const [serverUrl, setServerUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Add-on JSON form state
+  const [addonName, setAddonName] = useState('');
+  const [addonUrl, setAddonUrl] = useState('');
+  const [activeSavedAddonUrl, setActiveSavedAddonUrl] = useState<string | null>(null);
+  const [isValidatingAddon, setIsValidatingAddon] = useState(false);
+  const [addonValidationResult, setAddonValidationResult] = useState<{
+    success: boolean;
+    message: string;
+    stats?: { live: number; movies: number; series: number; total: number };
+  } | null>(null);
 
   // Processing & testing states
   const [isTesting, setIsTesting] = useState(false);
@@ -47,17 +54,30 @@ export const AddPlaylistScreen: React.FC<AddPlaylistScreenProps> = ({ onSuccess,
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{ playlist: Playlist; parsed: ParseResult } | null>(null);
 
-  // All 5 Xtream aliases use the exact same logic
-  const isXtreamMethod = selectedMethod !== 'm3u';
+  // Load any existing active Add-on JSON URL on mount
+  useEffect(() => {
+    const active = StorageService.getActiveAddonUrl();
+    if (active) {
+      setActiveSavedAddonUrl(active);
+      setAddonUrl(active);
+    }
+  }, []);
 
-  const methodOptions: { id: MethodChoice; label: string; badge: string; isXtream: boolean }[] = [
-    { id: 'm3u', label: 'M3U / M3U8', badge: 'Arquivo ou URL', isXtream: false },
-    { id: 'metodo3', label: 'MÉTODO 3', badge: 'Xtream / XC', isXtream: true },
-    { id: 'xc_api', label: 'XC API', badge: 'Xtream / XC', isXtream: true },
-    { id: 'xtream', label: 'XTREAM', badge: 'Xtream / XC', isXtream: true },
-    { id: 'xtream_codes', label: 'XTREAM CODES', badge: 'Xtream / XC', isXtream: true },
-    { id: 'xstream_account', label: 'XSTREAM ACCOUNT', badge: 'Xtream / XC', isXtream: true },
+  const methodOptions: { id: MethodChoice; label: string; badge: string; icon: React.FC<{ className?: string }> }[] = [
+    { id: 'm3u', label: 'M3U / M3U8', badge: 'Arquivo ou URL', icon: FileText },
+    { id: 'xtream', label: 'Xtream Codes', badge: 'Servidor & Login', icon: Server },
+    { id: 'addon_json', label: 'Add-on JSON', badge: 'Manifesto / TMDB', icon: Sparkles },
   ];
+
+  // Reset or remove active Add-on JSON
+  const handleResetAddon = () => {
+    StorageService.resetActiveAddon();
+    StreamResolverService.clearCache();
+    setActiveSavedAddonUrl(null);
+    setAddonUrl('');
+    setAddonValidationResult(null);
+    setErrorMessage(null);
+  };
 
   // Test Xtream Connection
   const handleTestConnection = async () => {
@@ -102,6 +122,253 @@ export const AddPlaylistScreen: React.FC<AddPlaylistScreenProps> = ({ onSuccess,
       setFileContent(content);
     };
     reader.readAsText(file);
+  };
+
+  // Validate Add-on JSON URL
+  const handleValidateAddon = async () => {
+    setAddonValidationResult(null);
+    setErrorMessage(null);
+    const targetUrl = addonUrl.trim();
+
+    if (!targetUrl) {
+      setAddonValidationResult({
+        success: false,
+        message: 'Por favor, informe a URL do Manifesto / Add-on JSON antes de validar.'
+      });
+      return;
+    }
+
+    setIsValidatingAddon(true);
+    try {
+      let rawData: any = null;
+      let fetchSuccess = false;
+      let lastErr = '';
+
+      // Direct fetch
+      try {
+        const res = await fetch(targetUrl, { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          rawData = await res.json();
+          fetchSuccess = true;
+        } else {
+          lastErr = `HTTP ${res.status}`;
+        }
+      } catch (err: any) {
+        lastErr = err.message || 'Erro de rede/CORS';
+      }
+
+      // Proxy fallback for external URLs
+      if (!fetchSuccess && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+        try {
+          const proxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+          const res = await fetch(proxyUrl, { headers: { Accept: 'application/json' } });
+          if (res.ok) {
+            rawData = await res.json();
+            fetchSuccess = true;
+          } else {
+            lastErr = `HTTP ${res.status} no proxy`;
+          }
+        } catch (err: any) {
+          lastErr = err.message || 'Falha no proxy';
+        }
+      }
+
+      if (!fetchSuccess || !rawData) {
+        throw new Error(`Não foi possível carregar o arquivo (${lastErr}). Verifique a URL.`);
+      }
+
+      const isStremioManifest = rawData && rawData.id && (rawData.resources || rawData.types || targetUrl.includes('manifest.json'));
+      const streams: StreamSource[] = isStremioManifest ? [] : parseFlexibleJsonManifest(rawData);
+
+      if (!isStremioManifest && (!Array.isArray(streams) || streams.length === 0)) {
+        throw new Error('O JSON foi baixado, mas não contém nenhuma mídia válida reconhecida nem um manifesto Stremio válido.');
+      }
+
+      if (isStremioManifest) {
+        setAddonValidationResult({
+          success: true,
+          message: `Manifesto Stremio "${rawData.name || 'Add-on'}" conectado com sucesso! (Recursos: ${(rawData.resources || []).join(', ')})`,
+          stats: { live: 0, movies: 0, series: 0, total: 0 }
+        });
+      } else {
+        const live = streams.filter(s => s.type === 'live').length;
+        const movies = streams.filter(s => s.type === 'movie' || (!s.type && s.title)).length;
+        const series = streams.filter(s => s.type === 'series').length;
+
+        setAddonValidationResult({
+          success: true,
+          message: `Manifesto validado com sucesso! ${streams.length} itens encontrados.`,
+          stats: { live, movies, series, total: streams.length }
+        });
+      }
+    } catch (err: any) {
+      setAddonValidationResult({
+        success: false,
+        message: `Erro na validação: ${err.message}`
+      });
+    } finally {
+      setIsValidatingAddon(false);
+    }
+  };
+
+  // Submit Add-on JSON
+  const handleSaveAddon = async () => {
+    setErrorMessage(null);
+    const targetUrl = addonUrl.trim();
+
+    if (!targetUrl) {
+      setErrorMessage('Por favor, informe a URL do Manifesto / Add-on JSON.');
+      return;
+    }
+
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://') && !targetUrl.startsWith('/')) {
+      setErrorMessage('A URL do manifesto deve começar com http://, https:// ou ser um caminho local (/streams.json).');
+      return;
+    }
+
+    setIsSaving(true);
+    setStatusMessage('Carregando e validando manifesto JSON desacoplado...');
+
+    try {
+      let rawData: any = null;
+      let fetchSuccess = false;
+      let lastErr = '';
+
+      // Direct fetch
+      try {
+        const res = await fetch(targetUrl, { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          rawData = await res.json();
+          fetchSuccess = true;
+        } else {
+          lastErr = `HTTP ${res.status}`;
+        }
+      } catch (err: any) {
+        lastErr = err.message || 'Erro de rede/CORS';
+      }
+
+      // Proxy fallback for external URLs
+      if (!fetchSuccess && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+        try {
+          const proxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+          const res = await fetch(proxyUrl, { headers: { Accept: 'application/json' } });
+          if (res.ok) {
+            rawData = await res.json();
+            fetchSuccess = true;
+          } else {
+            lastErr = `HTTP ${res.status} no proxy`;
+          }
+        } catch (err: any) {
+          lastErr = err.message || 'Falha no proxy';
+        }
+      }
+
+      if (!fetchSuccess || !rawData) {
+        throw new Error(`Não foi possível obter o manifesto (${lastErr}). Verifique se a URL está correta e acessível.`);
+      }
+
+      const isStremioManifest = rawData && rawData.id && (rawData.resources || rawData.types || targetUrl.includes('manifest.json'));
+      const streams: StreamSource[] = isStremioManifest ? [] : parseFlexibleJsonManifest(rawData);
+
+      if (!isStremioManifest && (!Array.isArray(streams) || streams.length === 0)) {
+        throw new Error('O arquivo JSON não contém nenhuma mídia válida reconhecida nem um manifesto Stremio válido.');
+      }
+
+      // 1. Store the URL in localStorage under foxstream_active_addon_url
+      StorageService.setActiveAddonUrl(targetUrl);
+
+      // 2. Set the active source mode to 'addon_json'
+      StorageService.setActiveSourceMode('addon_json');
+
+      // 3. Trigger cache clear on stream resolver
+      StreamResolverService.clearCache();
+
+      const playlistId = `addon_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const name = addonName.trim() || (rawData.name ? `Stremio: ${rawData.name}` : 'Manifesto Stremio Add-on');
+
+      const diagnostics = isStremioManifest ? [
+        `Manifesto Stremio conectado com sucesso: ${targetUrl}`,
+        `ID do Addon: ${rawData.id}`,
+        `Nome: ${rawData.name || 'Desconhecido'}`,
+        `Recursos suportados: ${(rawData.resources || []).join(', ')}`,
+        `Tipos suportados: ${(rawData.types || []).join(', ')}`,
+        `Prefixos de ID: ${(rawData.idPrefixes || []).join(', ')}`,
+        'Vitrine TMDB conectada com Stremio Add-on Protocol On-Demand (/stream/{type}/{id}.json).'
+      ] : [
+        `Manifesto conectado com sucesso a partir de: ${targetUrl}`,
+        `Total de fluxos de streaming indexados: ${streams.length}`,
+        `Filmes indexados para resolução sob demanda: ${streams.filter(s => s.type === 'movie' || (!s.type && s.title)).length}`,
+        `Séries indexadas para resolução sob demanda: ${streams.filter(s => s.type === 'series').length}`,
+        `Canais de TV ao vivo: ${streams.filter(s => s.type === 'live').length}`,
+        'Vitrine TMDB conectada com On-Demand Stream Resolver.'
+      ];
+
+      const liveStreams = streams.filter(s => s.type === 'live');
+      const movieStreams = streams.filter(s => s.type === 'movie' || (!s.type && s.title));
+      const seriesStreams = streams.filter(s => s.type === 'series');
+
+      const newPlaylist: Playlist = {
+        id: playlistId,
+        name,
+        type: 'addon_json',
+        addonUrl: targetUrl,
+        lastUpdated: new Date().toISOString(),
+        status: 'active',
+        stats: {
+          liveCount: liveStreams.length,
+          movieCount: movieStreams.length,
+          seriesCount: seriesStreams.length,
+          otherCount: 0
+        },
+        diagnostics
+      };
+
+      // Save playlist in StorageService
+      StorageService.savePlaylist(newPlaylist);
+
+      // In cache, also save basic channel representation for Live TV tab if any live streams exist
+      const channelItems = liveStreams.map(s => ({
+        id: s.id || `live_${Math.random()}`,
+        playlistId,
+        name: s.title,
+        streamUrl: s.streamUrl,
+        category: 'TV ao Vivo',
+      }));
+
+      await StorageService.saveContentCache(playlistId, {
+        channels: channelItems,
+        movies: [],
+        series: [],
+        others: []
+      });
+
+      // Update state for active banner
+      setActiveSavedAddonUrl(targetUrl);
+
+      // Show diagnostic summary view
+      setImportResult({
+        playlist: newPlaylist,
+        parsed: {
+          channels: channelItems,
+          movies: [],
+          series: [],
+          others: [],
+          totalParsed: streams.length,
+          stats: {
+            liveCount: liveStreams.length,
+            movieCount: movieStreams.length,
+            seriesCount: seriesStreams.length,
+            otherCount: 0
+          },
+          diagnostics
+        }
+      });
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Erro ao processar manifesto Add-on JSON.');
+    } finally {
+      setIsSaving(false);
+      setStatusMessage(null);
+    }
   };
 
   // Submit M3U Playlist
@@ -169,7 +436,7 @@ export const AddPlaylistScreen: React.FC<AddPlaylistScreenProps> = ({ onSuccess,
         }
       }
 
-      // Check if received content is HTML (Cloudflare bot check, 404/500 HTML page, login portal)
+      // Check if received content is HTML
       if (isHtmlContent(rawM3U)) {
         throw new Error('A URL não retornou uma playlist M3U válida. O servidor retornou uma página HTML em vez da lista de canais (verifique se a lista está ativa, se o usuário e senha na URL estão corretos ou se o link expirou).');
       }
@@ -322,7 +589,7 @@ export const AddPlaylistScreen: React.FC<AddPlaylistScreenProps> = ({ onSuccess,
     }
   };
 
-  // Quick Demo / Test Playlist Loader (Using Open Source & Public Domain Media - Blender Foundation / Big Buck Bunny / Tears of Steel / Open Streams)
+  // Quick Demo M3U Loader
   const handleLoadDemo = async () => {
     setIsSaving(true);
     setStatusMessage('Carregando lista de demonstração pública (Blender Foundation / Creative Commons)...');
@@ -406,17 +673,17 @@ https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscap
             </div>
             <div>
               <h2 className="text-base font-bold text-white font-['Outfit']">
-                Adicionar Lista IPTV
+                Adicionar Fonte / Conteúdo
               </h2>
               <p className="text-[11px] text-neutral-400">
-                Forneça suas credenciais ou arquivo M3U/M3U8
+                Selecione M3U, servidor Xtream Codes ou Manifesto Add-on JSON
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onCancel}
-            className="p-2 rounded-full bg-neutral-900 text-neutral-400 hover:text-white transition-colors"
+            className="p-2 rounded-full bg-neutral-900 text-neutral-400 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -430,10 +697,12 @@ https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscap
                 <CheckCircle2 className="w-7 h-7" />
               </div>
               <h3 className="text-xl font-bold text-white font-['Outfit']">
-                Playlist Importada com Sucesso!
+                {importResult.playlist.type === 'addon_json' 
+                  ? 'Manifesto Conectado com Sucesso!' 
+                  : 'Playlist Importada com Sucesso!'}
               </h3>
               <p className="text-xs text-neutral-400 max-w-md mx-auto">
-                <span className="text-neutral-200 font-semibold">{importResult.playlist.name}</span> foi validada e separada rigorosamente em categorias reais.
+                <span className="text-neutral-200 font-semibold">{importResult.playlist.name}</span> foi validada e vinculada à sua central FoxStream.
               </p>
             </div>
 
@@ -469,18 +738,18 @@ https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscap
                 <div className="text-2xl font-black text-white font-['Outfit']">
                   {importResult.parsed.stats.seriesCount}
                 </div>
-                <div className="text-[11px] text-neutral-500 mt-0.5">séries agrupadas</div>
+                <div className="text-[11px] text-neutral-500 mt-0.5">séries mapeadas</div>
               </div>
 
               <div className="p-4 rounded-2xl bg-neutral-900/80 border border-neutral-800 text-center">
                 <div className="flex items-center justify-center gap-1.5 text-indigo-400 mb-1.5">
                   <Layers className="w-4 h-4" />
-                  <span className="text-xs font-bold uppercase tracking-wider">Outros</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">Total</span>
                 </div>
                 <div className="text-2xl font-black text-white font-['Outfit']">
-                  {importResult.parsed.stats.otherCount}
+                  {importResult.parsed.totalParsed}
                 </div>
-                <div className="text-[11px] text-neutral-500 mt-0.5">isolados com segurança</div>
+                <div className="text-[11px] text-neutral-500 mt-0.5">itens indexados</div>
               </div>
             </div>
 
@@ -488,7 +757,7 @@ https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscap
             <div className="space-y-2">
               <span className="text-xs font-semibold text-neutral-300 uppercase tracking-wider flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-neutral-400" />
-                Relatório de Diagnóstico da Importação
+                Relatório de Diagnóstico da Conexão
               </span>
               <div className="bg-neutral-950 border border-neutral-800/90 rounded-2xl p-4 text-[12px] font-mono text-neutral-300 space-y-1.5 max-h-48 overflow-y-auto">
                 {importResult.parsed.diagnostics.map((diag, index) => (
@@ -520,6 +789,9 @@ https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscap
                   setM3uUrl('');
                   setFileContent(null);
                   setFileName(null);
+                  setAddonUrl('');
+                  setAddonName('');
+                  setAddonValidationResult(null);
                 }}
                 className="w-full sm:w-auto py-3.5 px-5 rounded-2xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-semibold text-xs transition-colors cursor-pointer"
               >
@@ -540,307 +812,470 @@ https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscap
                   <button
                     type="button"
                     onClick={() => setErrorMessage(null)}
-                    className="p-1 text-rose-400 hover:text-white transition-colors"
+                    className="p-1 text-rose-400 hover:text-white transition-colors cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
 
-          {/* Method Selection Bar (The 6 options requested) */}
-          <div>
-            <label className="block text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-2.5">
-              Método de Conexão:
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {methodOptions.map((opt) => {
-                const isSelected = selectedMethod === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedMethod(opt.id);
-                      setTestResult(null);
-                    }}
-                    className={`p-3 rounded-2xl border text-left transition-all relative overflow-hidden ${
-                      isSelected
-                        ? 'bg-orange-500/10 border-orange-500 text-white shadow-md shadow-orange-950/30'
-                        : 'bg-neutral-900/60 border-neutral-800/80 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      {opt.isXtream ? (
-                        <Server className={`w-4 h-4 ${isSelected ? 'text-orange-400' : 'text-neutral-500'}`} />
-                      ) : (
-                        <FileText className={`w-4 h-4 ${isSelected ? 'text-orange-400' : 'text-neutral-500'}`} />
-                      )}
-                      {isSelected && (
-                        <span className="w-2 h-2 rounded-full bg-orange-500 shadow-sm shadow-orange-400 animate-pulse" />
-                      )}
-                    </div>
-                    <div className="text-xs font-bold leading-tight font-['Outfit']">
-                      {opt.label}
-                    </div>
-                    <div className="text-[10px] text-neutral-500 mt-0.5">
-                      {opt.badge}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            {isXtreamMethod && (
-              <p className="text-[11px] text-neutral-400 mt-2 bg-neutral-900/80 p-2.5 rounded-xl border border-neutral-800 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  Conectando via autenticação <strong>Xtream Codes / XC API</strong> oficial com categorização direta.
-                </span>
-              </p>
-            )}
-          </div>
-
-          {/* Form Content Based on Method */}
-          {!isXtreamMethod ? (
-            /* ================= M3U / M3U8 FORM ================= */
-            <div className="space-y-4">
+              {/* 3-Option Selector Segment Control: [ M3U | Xtream Codes | Add-on JSON ] */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                  Nome da Playlist:
+                <label className="block text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-2.5">
+                  Tipo de Fonte / Conexão:
                 </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Minha Lista IPTV"
-                  value={playlistName}
-                  onChange={(e) => setPlaylistName(e.target.value)}
-                  className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
-                />
-              </div>
-
-              {/* Sub-tabs: URL vs File */}
-              <div>
-                <div className="flex rounded-xl bg-neutral-900 p-1 border border-neutral-800 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => setM3uSubTab('url')}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-                      m3uSubTab === 'url'
-                        ? 'bg-neutral-800 text-white shadow-sm'
-                        : 'text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    <Link2 className="w-3.5 h-3.5" />
-                    <span>URL M3U / M3U8</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setM3uSubTab('file')}
-                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
-                      m3uSubTab === 'file'
-                        ? 'bg-neutral-800 text-white shadow-sm'
-                        : 'text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Arquivo do Dispositivo</span>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {methodOptions.map((opt) => {
+                    const isSelected = selectedMethod === opt.id;
+                    const IconComponent = opt.icon;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMethod(opt.id);
+                          setTestResult(null);
+                          setErrorMessage(null);
+                        }}
+                        className={`p-3.5 rounded-2xl border text-left transition-all relative overflow-hidden cursor-pointer ${
+                          isSelected
+                            ? opt.id === 'addon_json'
+                              ? 'bg-purple-500/15 border-purple-500 text-white shadow-md shadow-purple-950/30'
+                              : 'bg-orange-500/10 border-orange-500 text-white shadow-md shadow-orange-950/30'
+                            : 'bg-neutral-900/60 border-neutral-800/80 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <IconComponent
+                            className={`w-4 h-4 ${
+                              isSelected
+                                ? opt.id === 'addon_json'
+                                  ? 'text-purple-400'
+                                  : 'text-orange-400'
+                                : 'text-neutral-500'
+                            }`}
+                          />
+                          {isSelected && (
+                            <span
+                              className={`w-2 h-2 rounded-full shadow-sm animate-pulse ${
+                                opt.id === 'addon_json'
+                                  ? 'bg-purple-400 shadow-purple-300'
+                                  : 'bg-orange-500 shadow-orange-400'
+                              }`}
+                            />
+                          )}
+                        </div>
+                        <div className="text-xs font-bold leading-tight font-['Outfit']">
+                          {opt.label}
+                        </div>
+                        <div className="text-[10px] text-neutral-500 mt-0.5">
+                          {opt.badge}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {m3uSubTab === 'url' ? (
+                {/* Subtitle helper description based on choice */}
+                <div className="mt-3">
+                  {selectedMethod === 'addon_json' ? (
+                    <p className="text-[11px] text-neutral-400 bg-purple-500/10 p-2.5 rounded-xl border border-purple-500/25 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+                      <span>
+                        Conecta a vitrine TMDB com sua lista de mídias desacoplada. Os metadados são carregados instantaneamente e os streams resolvidos sob demanda.
+                      </span>
+                    </p>
+                  ) : selectedMethod === 'xtream' ? (
+                    <p className="text-[11px] text-neutral-400 bg-neutral-900/80 p-2.5 rounded-xl border border-neutral-800 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>
+                        Conectando via autenticação <strong>Xtream Codes / XC API</strong> oficial com categorização direta.
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-neutral-400 bg-neutral-900/80 p-2.5 rounded-xl border border-neutral-800 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-orange-400 shrink-0" />
+                      <span>
+                        Compatível com arquivos ou URLs <strong>M3U / M3U8</strong> de IPTV com parâmetros padrão.
+                      </span>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* ================= OPTION 1: M3U FORM ================= */}
+              {selectedMethod === 'm3u' && (
+                <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                      Link / URL da Playlist (M3U ou M3U8):
+                      Nome da Playlist:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Minha Lista IPTV"
+                      value={playlistName}
+                      onChange={(e) => setPlaylistName(e.target.value)}
+                      className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
+
+                  {/* Sub-tabs: URL vs File */}
+                  <div>
+                    <div className="flex rounded-xl bg-neutral-900 p-1 border border-neutral-800 mb-3">
+                      <button
+                        type="button"
+                        onClick={() => setM3uSubTab('url')}
+                        className={`flex-1 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          m3uSubTab === 'url'
+                            ? 'bg-neutral-800 text-white shadow-sm'
+                            : 'text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>URL M3U / M3U8</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setM3uSubTab('file')}
+                        className={`flex-1 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          m3uSubTab === 'file'
+                            ? 'bg-neutral-800 text-white shadow-sm'
+                            : 'text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Arquivo do Dispositivo</span>
+                      </button>
+                    </div>
+
+                    {m3uSubTab === 'url' ? (
+                      <div>
+                        <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                          Link / URL da Playlist (M3U ou M3U8):
+                        </label>
+                        <input
+                          type="url"
+                          placeholder="http://servidor.exemplo.com/get.php?username=..."
+                          value={m3uUrl}
+                          onChange={(e) => setM3uUrl(e.target.value)}
+                          className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
+                        />
+                        <p className="text-[11px] text-neutral-500 mt-1">
+                          Compatível com links M3U com parâmetros tvg-name, tvg-logo e group-title.
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                          Selecione o arquivo .m3u ou .m3u8:
+                        </label>
+                        <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-neutral-800 hover:border-orange-500/50 bg-neutral-900/50 rounded-2xl cursor-pointer transition-colors text-center">
+                          <Upload className="w-8 h-8 text-neutral-500 mb-2" />
+                          <span className="text-xs font-medium text-neutral-300">
+                            {fileName ? fileName : 'Toque para escolher arquivo M3U do armazenamento'}
+                          </span>
+                          <span className="text-[10px] text-neutral-500 mt-1">
+                            Formatos suportados: .m3u, .m3u8, .txt
+                          </span>
+                          <input
+                            type="file"
+                            accept=".m3u,.m3u8,.txt,audio/x-mpegurl"
+                            onChange={handleFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Demonstration Helper Notice */}
+                  <div className="p-3.5 rounded-2xl bg-neutral-900/60 border border-neutral-800/80 flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2 text-neutral-400">
+                      <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Deseja testar com lista pública?</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleLoadDemo}
+                      disabled={isSaving}
+                      className="text-xs font-semibold text-orange-400 hover:text-orange-300 underline shrink-0 cursor-pointer"
+                    >
+                      Carregar Lista Teste (Open Source)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ================= OPTION 2: XTREAM CODES FORM ================= */}
+              {selectedMethod === 'xtream' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                      Nome da Lista:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Minha Conta Xtream"
+                      value={xtreamName}
+                      onChange={(e) => setXtreamName(e.target.value)}
+                      className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                      Servidor / URL:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="http://servidor.exemplo.com:8080 ou servidor.exemplo.com:8080"
+                      value={serverUrl}
+                      onChange={(e) => setServerUrl(e.target.value)}
+                      className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors font-mono"
+                    />
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Pode ser informado com ou sem <code>http://</code> ou <code>https://</code>.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                        Usuário:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="usuario"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                        Senha:
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Test Connection Button & Result Banner */}
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleTestConnection}
+                      disabled={isTesting || !serverUrl || !username || !password}
+                      className="flex items-center justify-center gap-2 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 border border-neutral-700 text-neutral-200 font-semibold py-2.5 px-4 rounded-xl text-xs transition-colors w-full sm:w-auto cursor-pointer"
+                    >
+                      {isTesting ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+                      ) : (
+                        <ShieldCheck className="w-4 h-4 text-orange-400" />
+                      )}
+                      <span>Testar Conexão</span>
+                    </button>
+
+                    {testResult && (
+                      <div
+                        className={`mt-3 p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                          testResult.success
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                            : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                        }`}
+                      >
+                        {testResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        )}
+                        <div>
+                          <span className="font-bold">{testResult.message}</span>
+                          {testResult.authData?.user_info?.exp_date && (
+                            <p className="text-[10px] opacity-80 mt-0.5">
+                              Expiração: {new Date(parseInt(testResult.authData.user_info.exp_date, 10) * 1000).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ================= OPTION 3: ADD-ON JSON / MANIFEST FORM ================= */}
+              {selectedMethod === 'addon_json' && (
+                <div className="space-y-4">
+                  {/* Active Add-on Banner with Reset button */}
+                  {activeSavedAddonUrl && (
+                    <div className="p-3.5 bg-purple-500/10 border border-purple-500/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-white block font-['Outfit']">
+                            Manifesto Ativo no FoxStream
+                          </span>
+                          <span className="text-[11px] text-purple-300 font-mono truncate block max-w-sm">
+                            {activeSavedAddonUrl}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleResetAddon}
+                        className="text-xs px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-rose-950/40 border border-neutral-700 hover:border-rose-800 text-rose-300 hover:text-rose-200 transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
+                        title="Remove o manifesto e restaura a lista padrão"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Resetar / Remover Manifesto</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Addon Name */}
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                      Nome da Fonte (Opcional):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Vitrine Desacoplada FoxStream"
+                      value={addonName}
+                      onChange={(e) => setAddonName(e.target.value)}
+                      className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors"
+                    />
+                  </div>
+
+                  {/* Addon URL */}
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                      URL do Manifesto / Add-on JSON:
                     </label>
                     <input
                       type="url"
-                      placeholder="http://servidor.exemplo.com/get.php?username=..."
-                      value={m3uUrl}
-                      onChange={(e) => setM3uUrl(e.target.value)}
-                      className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
+                      placeholder="https://exemplo.com/manifest.json ou https://exemplo.com/streams.json"
+                      value={addonUrl}
+                      onChange={(e) => setAddonUrl(e.target.value)}
+                      className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors font-mono"
                     />
-                    <p className="text-[11px] text-neutral-500 mt-1">
-                      Compatível com links M3U com parâmetros tvg-name, tvg-logo e group-title.
+                    <p className="text-[11px] text-neutral-400 mt-1.5">
+                      Conecta a vitrine TMDB com sua lista de mídias desacoplada.
                     </p>
                   </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                      Selecione o arquivo .m3u ou .m3u8:
-                    </label>
-                    <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-neutral-800 hover:border-orange-500/50 bg-neutral-900/50 rounded-2xl cursor-pointer transition-colors text-center">
-                      <Upload className="w-8 h-8 text-neutral-500 mb-2" />
-                      <span className="text-xs font-medium text-neutral-300">
-                        {fileName ? fileName : 'Toque para escolher arquivo M3U do armazenamento'}
-                      </span>
-                      <span className="text-[10px] text-neutral-500 mt-1">
-                        Formatos suportados: .m3u, .m3u8, .txt
-                      </span>
-                      <input
-                        type="file"
-                        accept=".m3u,.m3u8,.txt,audio/x-mpegurl"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* ================= XTREAM / XC API FORM ================= */
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                  Nome da Lista:
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Minha Conta Xtream"
-                  value={xtreamName}
-                  onChange={(e) => setXtreamName(e.target.value)}
-                  className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors"
-                />
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                  Servidor / URL:
-                </label>
-                <input
-                  type="text"
-                  placeholder="http://servidor.exemplo.com:8080 ou servidor.exemplo.com:8080"
-                  value={serverUrl}
-                  onChange={(e) => setServerUrl(e.target.value)}
-                  className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors font-mono"
-                />
-                <p className="text-[11px] text-neutral-500 mt-1">
-                  Pode ser informado com ou sem <code>http://</code> ou <code>https://</code>.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                    Usuário:
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="usuario"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                    Senha:
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-neutral-900/90 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500 transition-colors font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Test Connection Button & Result Banner */}
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={handleTestConnection}
-                  disabled={isTesting || !serverUrl || !username || !password}
-                  className="flex items-center justify-center gap-2 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 border border-neutral-700 text-neutral-200 font-semibold py-2.5 px-4 rounded-xl text-xs transition-colors w-full sm:w-auto"
-                >
-                  {isTesting ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-                  ) : (
-                    <ShieldCheck className="w-4 h-4 text-orange-400" />
-                  )}
-                  <span>Testar Conexão</span>
-                </button>
-
-                {testResult && (
-                  <div
-                    className={`mt-3 p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
-                      testResult.success
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                        : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                    }`}
-                  >
-                    {testResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                    )}
-                    <div>
-                      <span className="font-bold">{testResult.message}</span>
-                      {testResult.authData?.user_info?.exp_date && (
-                        <p className="text-[10px] opacity-80 mt-0.5">
-                          Expiração: {new Date(parseInt(testResult.authData.user_info.exp_date, 10) * 1000).toLocaleDateString()}
-                        </p>
+                  {/* Action row: Validate JSON & Default test manifest */}
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleValidateAddon}
+                      disabled={isValidatingAddon || !addonUrl.trim()}
+                      className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 border border-neutral-700 text-neutral-200 font-semibold py-2 px-3.5 rounded-xl text-xs transition-colors cursor-pointer"
+                    >
+                      {isValidatingAddon ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-400" />
+                      ) : (
+                        <Globe className="w-3.5 h-3.5 text-purple-400" />
                       )}
-                    </div>
+                      <span>Validar Manifesto JSON</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddonUrl('/streams.json');
+                        setAddonName('Manifesto Demo Interno');
+                      }}
+                      className="text-xs text-purple-400 hover:text-purple-300 hover:underline px-2 py-1 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Usar streams.json de teste integrado</span>
+                    </button>
                   </div>
+
+                  {/* Validation Feedback */}
+                  {addonValidationResult && (
+                    <div
+                      className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                        addonValidationResult.success
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                          : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                      }`}
+                    >
+                      {addonValidationResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      )}
+                      <div>
+                        <span className="font-bold">{addonValidationResult.message}</span>
+                        {addonValidationResult.stats && (
+                          <div className="flex items-center gap-2 mt-1 text-[11px] opacity-90">
+                            <span>{addonValidationResult.stats.movies} filmes</span>
+                            <span>•</span>
+                            <span>{addonValidationResult.stats.series} séries</span>
+                            <span>•</span>
+                            <span>{addonValidationResult.stats.live} canais</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Loading & Status display */}
+              {isSaving && (
+                <div className="p-4 rounded-2xl bg-orange-500/10 border border-orange-500/30 text-orange-300 text-xs flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 animate-spin shrink-0 text-orange-400" />
+                  <div>
+                    <p className="font-semibold">{statusMessage || 'Processando lista...'}</p>
+                    {parseProgress && <p className="text-[10px] text-neutral-400 mt-0.5">{parseProgress}</p>}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Action Bottom Bar */}
+            <div className="p-4 sm:p-6 border-t border-neutral-800 bg-[#0d0f17] flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={isSaving}
+                className="px-4 py-2.5 rounded-xl border border-neutral-800 text-neutral-400 hover:text-white text-xs font-medium transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={
+                  selectedMethod === 'xtream'
+                    ? handleSaveXtream
+                    : selectedMethod === 'addon_json'
+                    ? handleSaveAddon
+                    : handleSaveM3U
+                }
+                disabled={isSaving}
+                className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl text-xs shadow-lg shadow-orange-950/40 active:scale-95 transition-all cursor-pointer"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ArrowRight className="w-4 h-4" />
                 )}
-              </div>
+                <span>
+                  {selectedMethod === 'addon_json'
+                    ? 'Salvar e Conectar Manifesto'
+                    : 'Salvar e Sincronizar Conteúdo'}
+                </span>
+              </button>
             </div>
-          )}
-
-          {/* Loading & Status display */}
-          {isSaving && (
-            <div className="p-4 rounded-2xl bg-orange-500/10 border border-orange-500/30 text-orange-300 text-xs flex items-center gap-3">
-              <Loader2 className="w-5 h-5 animate-spin shrink-0 text-orange-400" />
-              <div>
-                <p className="font-semibold">{statusMessage || 'Processando lista...'}</p>
-                {parseProgress && <p className="text-[10px] text-neutral-400 mt-0.5">{parseProgress}</p>}
-              </div>
-            </div>
-          )}
-
-          {/* Demonstration Helper Notice */}
-          <div className="p-3.5 rounded-2xl bg-neutral-900/60 border border-neutral-800/80 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-neutral-400">
-              <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Deseja testar sem lista agora?</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleLoadDemo}
-              disabled={isSaving}
-              className="text-xs font-semibold text-orange-400 hover:text-orange-300 underline shrink-0 cursor-pointer"
-            >
-              Carregar Lista Teste (Domínio Público)
-            </button>
-          </div>
-        </div>
-
-        {/* Action Bottom Bar */}
-        <div className="p-4 sm:p-6 border-t border-neutral-800 bg-[#0d0f17] flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={isSaving}
-            className="px-4 py-2.5 rounded-xl border border-neutral-800 text-neutral-400 hover:text-white text-xs font-medium transition-colors"
-          >
-            Cancelar
-          </button>
-
-          <button
-            type="button"
-            onClick={isXtreamMethod ? handleSaveXtream : handleSaveM3U}
-            disabled={isSaving}
-            className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl text-xs shadow-lg shadow-orange-950/40 active:scale-95 transition-all"
-          >
-            {isSaving ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <ArrowRight className="w-4 h-4" />
-            )}
-            <span>Salvar e Sincronizar Conteúdo</span>
-          </button>
-        </div>
-        </>
+          </>
         )}
       </div>
     </div>

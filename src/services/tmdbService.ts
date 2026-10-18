@@ -4,6 +4,8 @@
  * year tolerance with remake protection, and category validation.
  */
 
+import { TmdbMediaItem } from '../types';
+
 export interface TmdbData {
   tmdbId?: number;
   title?: string;
@@ -26,9 +28,34 @@ export interface SmartMatchResult {
   reason: string;
 }
 
-const BASE_URL = 'https://api.themoviedb.org/3';
-const POSTER_BASE = 'https://image.tmdb.org/t/p/w500';
-const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w1280';
+export const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+export const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/';
+export const POSTER_BASE = 'https://image.tmdb.org/t/p/w500';
+export const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w1280';
+
+export function getTmdbApiKey(): string {
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    const envKey = import.meta.env.VITE_TMDB_API_KEY || import.meta.env.NEXT_PUBLIC_TMDB_API_KEY;
+    if (envKey && typeof envKey === 'string' && envKey.trim().length > 5) {
+      return envKey.trim();
+    }
+  }
+  return '6fb6ba516b5df9841c2ac73a2974bbfb';
+}
+
+export function getPosterUrl(path?: string, size: 'w200' | 'w300' | 'w500' | 'original' = 'w500'): string | undefined {
+  if (!path) return undefined;
+  if (path.startsWith('http')) return path;
+  return `${TMDB_IMAGE_BASE}${size}${path}`;
+}
+
+export function getBackdropUrl(path?: string, size: 'w780' | 'w1280' | 'original' = 'w1280'): string | undefined {
+  if (!path) return undefined;
+  if (path.startsWith('http')) return path;
+  return `${TMDB_IMAGE_BASE}${size}${path}`;
+}
+
+const BASE_URL = TMDB_BASE_URL;
 
 const ROMAN_NUMERALS: Record<string, string> = {
   i: '1',
@@ -401,7 +428,7 @@ export const TmdbService = {
   /**
    * Fetch category lists from TMDb
    */
-  async fetchCategoryList(endpoint: string, isTv: boolean = false, apiKey: string = '6fb6ba516b5df9841c2ac73a2974bbfb'): Promise<TmdbData[]> {
+  async fetchCategoryList(endpoint: string, isTv: boolean = false, apiKey: string = getTmdbApiKey()): Promise<TmdbData[]> {
     try {
       const sep = endpoint.includes('?') ? '&' : '?';
       const url = `${BASE_URL}/${endpoint}${sep}api_key=${apiKey}&language=pt-BR`;
@@ -426,8 +453,8 @@ export const TmdbService = {
     }
   },
 
-  fetchTrending() {
-    return this.fetchCategoryList('trending/all/week', false);
+  fetchTrending(mediaType: 'all' | 'movie' | 'tv' = 'all', timeWindow: 'day' | 'week' = 'week') {
+    return this.fetchCategoryList(`trending/${mediaType}/${timeWindow}`, mediaType === 'tv');
   },
 
   fetchTrendingMovies() {
@@ -438,15 +465,211 @@ export const TmdbService = {
     return this.fetchCategoryList('trending/tv/week', true);
   },
 
-  fetchPopularMovies() {
-    return this.fetchCategoryList('movie/popular', false);
+  fetchPopularMovies(page: number = 1) {
+    return this.fetchCategoryList(`movie/popular?page=${page}`, false);
   },
 
-  fetchPopularTv() {
-    return this.fetchCategoryList('tv/popular', true);
+  fetchPopularTv(page: number = 1) {
+    return this.fetchCategoryList(`tv/popular?page=${page}`, true);
   },
 
-  fetchNowPlayingMovies() {
-    return this.fetchCategoryList('movie/now_playing', false);
+  fetchNowPlayingMovies(page: number = 1) {
+    return this.fetchCategoryList(`movie/now_playing?page=${page}`, false);
+  },
+
+  fetchTopRatedMovies(page: number = 1) {
+    return this.fetchCategoryList(`movie/top_rated?page=${page}`, false);
+  },
+
+  fetchUpcomingMovies(page: number = 1) {
+    return this.fetchCategoryList(`movie/upcoming?page=${page}`, false);
+  },
+
+  fetchTopRatedTv(page: number = 1) {
+    return this.fetchCategoryList(`tv/top_rated?page=${page}`, true);
+  },
+
+  fetchAiringTodayTv(page: number = 1) {
+    return this.fetchCategoryList(`tv/airing_today?page=${page}`, true);
+  },
+
+  fetchMoviesByGenre(genreId: number, page: number = 1) {
+    return this.fetchCategoryList(`discover/movie?with_genres=${genreId}&sort_by=popularity.desc&page=${page}`, false);
+  },
+
+  fetchTvByGenre(genreId: number, page: number = 1) {
+    return this.fetchCategoryList(`discover/tv?with_genres=${genreId}&sort_by=popularity.desc&page=${page}`, true);
+  },
+
+  /**
+   * Fetch complete movie details including cast, trailers, runtime, and genres
+   */
+  async fetchFullMovieDetails(id: number | string, apiKey: string = getTmdbApiKey()): Promise<TmdbMediaItem | null> {
+    try {
+      const url = `${BASE_URL}/movie/${id}?api_key=${apiKey}&language=pt-BR&append_to_response=credits,videos`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+
+      // Extract trailer (YouTube preferred)
+      let trailerUrl: string | undefined = undefined;
+      const videos = data.videos?.results || [];
+      const trailer = videos.find((v: any) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')) || videos[0];
+      if (trailer && trailer.site === 'YouTube' && trailer.key) {
+        trailerUrl = `https://www.youtube.com/watch?v=${trailer.key}`;
+      }
+
+      // Extract top cast members
+      const cast = (data.credits?.cast || []).slice(0, 10).map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        character: c.character,
+        profilePath: c.profile_path ? `${POSTER_BASE}${c.profile_path}` : undefined,
+      }));
+
+      return {
+        id: data.id,
+        title: data.title || data.original_title,
+        originalTitle: data.original_title,
+        overview: data.overview || 'Sinopse não disponível.',
+        posterPath: data.poster_path ? `${POSTER_BASE}${data.poster_path}` : undefined,
+        backdropPath: data.backdrop_path ? `${BACKDROP_BASE}${data.backdrop_path}` : undefined,
+        releaseDate: data.release_date,
+        year: data.release_date ? data.release_date.slice(0, 4) : undefined,
+        voteAverage: data.vote_average || 0,
+        voteCount: data.vote_count,
+        mediaType: 'movie',
+        genres: data.genres || [],
+        runtime: data.runtime,
+        tagline: data.tagline,
+        cast,
+        trailerUrl,
+      };
+    } catch (err) {
+      console.warn(`[TMDb Web] Fetch full movie details for ${id} failed:`, err);
+      return null;
+    }
+  },
+
+  /**
+   * Fetch complete TV series details including cast, seasons, trailers, and genres
+   */
+  async fetchFullTvDetails(id: number | string, apiKey: string = getTmdbApiKey()): Promise<TmdbMediaItem | null> {
+    try {
+      const url = `${BASE_URL}/tv/${id}?api_key=${apiKey}&language=pt-BR&append_to_response=credits,videos`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+
+      // Extract trailer (YouTube preferred)
+      let trailerUrl: string | undefined = undefined;
+      const videos = data.videos?.results || [];
+      const trailer = videos.find((v: any) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')) || videos[0];
+      if (trailer && trailer.site === 'YouTube' && trailer.key) {
+        trailerUrl = `https://www.youtube.com/watch?v=${trailer.key}`;
+      }
+
+      // Extract top cast members
+      const cast = (data.credits?.cast || []).slice(0, 10).map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        character: c.character,
+        profilePath: c.profile_path ? `${POSTER_BASE}${c.profile_path}` : undefined,
+      }));
+
+      return {
+        id: data.id,
+        title: data.name || data.original_name,
+        originalTitle: data.original_name,
+        overview: data.overview || 'Sinopse não disponível.',
+        posterPath: data.poster_path ? `${POSTER_BASE}${data.poster_path}` : undefined,
+        backdropPath: data.backdrop_path ? `${BACKDROP_BASE}${data.backdrop_path}` : undefined,
+        firstAirDate: data.first_air_date,
+        releaseDate: data.first_air_date,
+        year: data.first_air_date ? data.first_air_date.slice(0, 4) : undefined,
+        voteAverage: data.vote_average || 0,
+        voteCount: data.vote_count,
+        mediaType: 'tv',
+        genres: data.genres || [],
+        numberOfSeasons: data.number_of_seasons,
+        numberOfEpisodes: data.number_of_episodes,
+        tagline: data.tagline,
+        cast,
+        trailerUrl,
+      };
+    } catch (err) {
+      console.warn(`[TMDb Web] Fetch full tv details for ${id} failed:`, err);
+      return null;
+    }
+  },
+
+  /**
+   * Multi search (movies and series) from TMDb
+   */
+  async searchMulti(query: string, page: number = 1, apiKey: string = getTmdbApiKey()): Promise<TmdbMediaItem[]> {
+    if (!query || !query.trim()) return [];
+    try {
+      const q = encodeURIComponent(query.trim());
+      const url = `${BASE_URL}/search/multi?api_key=${apiKey}&language=pt-BR&query=${q}&page=${page}&include_adult=false`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (!data.results) return [];
+
+      return data.results
+        .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv')
+        .map((item: any) => {
+          const isTv = item.media_type === 'tv';
+          return {
+            id: item.id,
+            title: isTv ? item.name : item.title,
+            originalTitle: isTv ? item.original_name : item.original_title,
+            overview: item.overview,
+            posterPath: item.poster_path ? `${POSTER_BASE}${item.poster_path}` : undefined,
+            backdropPath: item.backdrop_path ? `${BACKDROP_BASE}${item.backdrop_path}` : undefined,
+            releaseDate: isTv ? item.first_air_date : item.release_date,
+            year: (isTv ? item.first_air_date : item.release_date)?.slice(0, 4),
+            voteAverage: item.vote_average || 0,
+            voteCount: item.vote_count,
+            mediaType: item.media_type,
+            genres: [],
+          };
+        });
+    } catch (err) {
+      console.warn('[TMDb Web] Search multi failed:', err);
+      return [];
+    }
+  },
+
+  /**
+   * Fetch external IDs (like IMDb ID 'tt...') for a movie or TV show from TMDb
+   */
+  async fetchExternalIds(id: number | string, mediaType: 'movie' | 'tv', apiKey: string = getTmdbApiKey()): Promise<string | null> {
+    try {
+      const url = `${BASE_URL}/${mediaType === 'tv' ? 'tv' : 'movie'}/${id}/external_ids?api_key=${apiKey}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.imdb_id || null;
+    } catch (err) {
+      console.warn(`[TMDb Web] Fetch external IDs for ${mediaType} ${id} failed:`, err);
+      return null;
+    }
+  },
+
+  /**
+   * Fetch genre list from TMDb
+   */
+  async fetchGenres(type: 'movie' | 'tv' = 'movie', apiKey: string = getTmdbApiKey()): Promise<{ id: number; name: string }[]> {
+    try {
+      const url = `${BASE_URL}/genre/${type}/list?api_key=${apiKey}&language=pt-BR`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.genres || [];
+    } catch (err) {
+      console.warn(`[TMDb Web] Fetch genres for ${type} failed:`, err);
+      return [];
+    }
   },
 };

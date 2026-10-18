@@ -1,4 +1,4 @@
-export type PlaylistType = 'm3u' | 'xtream';
+export type PlaylistType = 'm3u' | 'xtream' | 'addon_json';
 export type ContentType = 'live' | 'movie' | 'series' | 'other';
 
 export interface PlaylistStats {
@@ -19,6 +19,8 @@ export interface Playlist {
   serverUrl?: string;
   username?: string;
   password?: string; // Stored securely/encoded
+  // Add-on JSON specific
+  addonUrl?: string;
   // Metadata
   lastUpdated: string;
   status: 'active' | 'error' | 'syncing';
@@ -162,4 +164,52 @@ export interface XtreamCategory {
   category_id: string;
   category_name: string;
   parent_id?: number;
+}
+
+// Structure for streams.json
+export interface StreamSource {
+  id: string;
+  tmdb_id?: number | string;
+  title: string;
+  year?: number;
+  type: 'movie' | 'series' | 'live';
+  streamUrl: string;
+  quality?: string; // e.g., "1080p", "4K"
+  format?: 'mp4' | 'hls' | 'mkv';
+}
+
+// Internal Unified Playback State
+export interface ActivePlaybackPayload {
+  tmdbId: number;
+  title: string;
+  posterPath: string;
+  backdropPath: string;
+  streamUrl: string;
+  format?: string;
+  type?: 'movie' | 'series' | 'live';
+  seasonEpisode?: string;
+  seriesName?: string;
+}
+
+// TMDB Full Details Model
+export interface TmdbMediaItem {
+  id: number;
+  title: string;
+  originalTitle?: string;
+  overview: string;
+  posterPath?: string;
+  backdropPath?: string;
+  releaseDate?: string;
+  firstAirDate?: string;
+  year?: string;
+  voteAverage: number;
+  voteCount?: number;
+  mediaType: 'movie' | 'tv';
+  genres?: { id: number; name: string }[];
+  runtime?: number;
+  numberOfSeasons?: number;
+  numberOfEpisodes?: number;
+  tagline?: string;
+  cast?: { id: number; name: string; character: string; profilePath?: string }[];
+  trailerUrl?: string;
 }

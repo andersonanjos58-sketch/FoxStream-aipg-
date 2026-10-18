@@ -8,6 +8,8 @@ const STORAGE_KEYS = {
   HISTORY: 'foxstream_history_v1',
   CONTENT_CACHE_PREFIX: 'foxstream_content_',
   LAST_LIVE_CHANNEL: 'foxstream_last_live_channel_v1',
+  ADDON_URL: 'foxstream_active_addon_url',
+  ACTIVE_SOURCE_MODE: 'foxstream_active_source_mode',
 };
 
 /**
@@ -300,6 +302,37 @@ export class StorageService {
       console.warn('Failed to set active playlist id:', err);
     }
   }
+
+  /**
+   * Add-on JSON / Manifest URL configuration
+   */
+  public static getActiveAddonUrl(): string | null {
+    return safeStorage.getItem(STORAGE_KEYS.ADDON_URL);
+  }
+
+  public static setActiveAddonUrl(url: string | null): void {
+    if (url && url.trim()) {
+      safeStorage.setItem(STORAGE_KEYS.ADDON_URL, url.trim());
+      safeStorage.setItem(STORAGE_KEYS.ACTIVE_SOURCE_MODE, 'addon_json');
+    } else {
+      safeStorage.removeItem(STORAGE_KEYS.ADDON_URL);
+    }
+  }
+
+  public static getActiveSourceMode(): 'playlist' | 'addon_json' {
+    const mode = safeStorage.getItem(STORAGE_KEYS.ACTIVE_SOURCE_MODE);
+    return mode === 'addon_json' ? 'addon_json' : 'playlist';
+  }
+
+  public static setActiveSourceMode(mode: 'playlist' | 'addon_json'): void {
+    safeStorage.setItem(STORAGE_KEYS.ACTIVE_SOURCE_MODE, mode);
+  }
+
+  public static resetActiveAddon(): void {
+    safeStorage.removeItem(STORAGE_KEYS.ADDON_URL);
+    safeStorage.setItem(STORAGE_KEYS.ACTIVE_SOURCE_MODE, 'playlist');
+  }
+
 
   /**
    * Save content cache for a playlist (channels, movies, series, others)

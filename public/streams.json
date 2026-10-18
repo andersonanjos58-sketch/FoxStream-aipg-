@@ -1,0 +1,226 @@
+[
+  {
+    "id": "stream_bbb",
+    "tmdb_id": 10378,
+    "title": "Big Buck Bunny",
+    "year": 2008,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_tos",
+    "tmdb_id": 198375,
+    "title": "Tears of Steel",
+    "year": 2012,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+    "quality": "4K",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_sintel",
+    "tmdb_id": 45745,
+    "title": "Sintel",
+    "year": 2010,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_elephants_dream",
+    "tmdb_id": 11134,
+    "title": "Elephants Dream",
+    "year": 2006,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_cosmos_laundromat",
+    "tmdb_id": 353069,
+    "title": "Cosmos Laundromat",
+    "year": 2015,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackSeeTheWorld.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_spring",
+    "tmdb_id": 585244,
+    "title": "Spring",
+    "year": 2019,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_dune_2",
+    "tmdb_id": 693134,
+    "title": "Duna: Parte 2",
+    "year": 2024,
+    "type": "movie",
+    "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    "quality": "4K",
+    "format": "hls"
+  },
+  {
+    "id": "stream_deadpool_wolverine",
+    "tmdb_id": 533535,
+    "title": "Deadpool & Wolverine",
+    "year": 2024,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
+    "quality": "4K",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_inside_out_2",
+    "tmdb_id": 1022789,
+    "title": "Divertida Mente 2",
+    "year": 2024,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_gladiator_2",
+    "tmdb_id": 558449,
+    "title": "Gladiador II",
+    "year": 2024,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+    "quality": "4K",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_moana_2",
+    "tmdb_id": 1241982,
+    "title": "Moana 2",
+    "year": 2024,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_interstellar",
+    "tmdb_id": 157336,
+    "title": "Interestelar",
+    "year": 2014,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+    "quality": "4K",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_inception",
+    "tmdb_id": 27205,
+    "title": "A Origem",
+    "year": 2010,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_the_dark_knight",
+    "tmdb_id": 155,
+    "title": "Batman: O Cavaleiro das Trevas",
+    "year": 2008,
+    "type": "movie",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_arcane",
+    "tmdb_id": 94605,
+    "title": "Arcane",
+    "year": 2021,
+    "type": "series",
+    "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    "quality": "4K",
+    "format": "hls"
+  },
+  {
+    "id": "stream_fallout",
+    "tmdb_id": 106379,
+    "title": "Fallout",
+    "year": 2024,
+    "type": "series",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WhatCarCanYouGetForAGrand.mp4",
+    "quality": "4K",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_stranger_things",
+    "tmdb_id": 66732,
+    "title": "Stranger Things",
+    "year": 2016,
+    "type": "series",
+    "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    "quality": "4K",
+    "format": "hls"
+  },
+  {
+    "id": "stream_breaking_bad",
+    "tmdb_id": 1396,
+    "title": "Breaking Bad",
+    "year": 2008,
+    "type": "series",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+    "quality": "1080p",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_house_of_dragon",
+    "tmdb_id": 94997,
+    "title": "A Casa do Dragão",
+    "year": 2022,
+    "type": "series",
+    "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    "quality": "4K",
+    "format": "hls"
+  },
+  {
+    "id": "stream_the_last_of_us",
+    "tmdb_id": 100088,
+    "title": "The Last of Us",
+    "year": 2023,
+    "type": "series",
+    "streamUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+    "quality": "4K",
+    "format": "mp4"
+  },
+  {
+    "id": "stream_live_nasa",
+    "title": "NASA TV",
+    "type": "live",
+    "streamUrl": "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8",
+    "quality": "1080p",
+    "format": "hls"
+  },
+  {
+    "id": "stream_live_redbull",
+    "title": "Red Bull TV",
+    "type": "live",
+    "streamUrl": "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8",
+    "quality": "1080p",
+    "format": "hls"
+  },
+  {
+    "id": "stream_live_test_hls",
+    "title": "Canal de Teste HLS",
+    "type": "live",
+    "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+    "quality": "1080p",
+    "format": "hls"
+  }
+]
