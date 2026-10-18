@@ -15,6 +15,7 @@ export interface UseStreamResolverParams {
 export interface UseStreamResolverResult {
   state: StreamVerificationState;
   stream: StreamSource | null;
+  allStreams: StreamSource[];
   isAvailable: boolean;
   isLoading: boolean;
   isUnavailable: boolean;
@@ -25,6 +26,7 @@ export interface UseStreamResolverResult {
 export function useStreamResolver(params?: UseStreamResolverParams): UseStreamResolverResult {
   const [state, setState] = useState<StreamVerificationState>('IDLE');
   const [stream, setStream] = useState<StreamSource | null>(null);
+  const [allStreams, setAllStreams] = useState<StreamSource[]>([]);
   const [matchType, setMatchType] = useState<'tmdb_id' | 'title_year' | 'stremio_addon' | undefined>();
 
   const currentParamsRef = useRef(params);
@@ -38,6 +40,7 @@ export function useStreamResolver(params?: UseStreamResolverParams): UseStreamRe
       if (!tmdbId && !title) {
         setState('UNAVAILABLE');
         setStream(null);
+        setAllStreams([]);
         return null;
       }
 
@@ -53,11 +56,13 @@ export function useStreamResolver(params?: UseStreamResolverParams): UseStreamRe
 
         if (result.matched && result.stream) {
           setStream(result.stream);
+          setAllStreams(result.allStreams || [result.stream]);
           setMatchType(result.matchType);
           setState('IS_AVAILABLE');
           return result.stream;
         } else {
           setStream(null);
+          setAllStreams([]);
           setMatchType(undefined);
           setState('UNAVAILABLE');
           return null;
@@ -65,6 +70,7 @@ export function useStreamResolver(params?: UseStreamResolverParams): UseStreamRe
       } catch (err) {
         console.warn('[useStreamResolver] Error resolving stream:', err);
         setStream(null);
+        setAllStreams([]);
         setState('UNAVAILABLE');
         return null;
       }
@@ -78,12 +84,14 @@ export function useStreamResolver(params?: UseStreamResolverParams): UseStreamRe
     } else if (!params?.tmdbId && !params?.title) {
       setState('IDLE');
       setStream(null);
+      setAllStreams([]);
     }
   }, [params?.tmdbId, params?.title, params?.year, params?.type, params?.autoResolve, resolve]);
 
   return {
     state,
     stream,
+    allStreams,
     isAvailable: state === 'IS_AVAILABLE',
     isLoading: state === 'LOADING',
     isUnavailable: state === 'UNAVAILABLE',

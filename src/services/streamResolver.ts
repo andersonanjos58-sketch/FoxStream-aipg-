@@ -216,6 +216,7 @@ export class StreamResolverService {
   }): Promise<{
     matched: boolean;
     stream: StreamSource | null;
+    allStreams?: StreamSource[]; // Add allStreams
     matchType?: 'tmdb_id' | 'title_year' | 'stremio_addon';
     score?: number;
   }> {
@@ -268,19 +269,26 @@ export class StreamResolverService {
             const data = await res.json();
             const streamsArray = data.streams || [];
             if (streamsArray.length > 0) {
-              const bestStream = streamsArray[0];
-              const resolvedSource: StreamSource = {
-                id: `stremio_${imdbId}`,
+              // Return all streams instead of just the first one.
+              // NOTE: This requires updating the return type and handling in the UI.
+              // For now, mapping all streams to Source format.
+              const resolvedSources: StreamSource[] = streamsArray.map((s: any, idx: number) => ({
+                id: `stremio_${imdbId}_${idx}`,
                 tmdb_id: tmdbId,
-                title: bestStream.title || bestStream.name || title || 'Stream Stremio',
+                title: s.title || s.name || title || 'Stream Stremio',
                 type: mediaType,
-                streamUrl: bestStream.url || (bestStream.infoHash ? `magnet:?xt=urn:btih:${bestStream.infoHash}` : ''),
-                quality: bestStream.name || bestStream.quality || '1080p',
+                streamUrl: s.url || (s.infoHash ? `magnet:?xt=urn:btih:${s.infoHash}` : ''),
+                quality: s.name || s.quality || '1080p',
                 format: 'mp4'
-              };
+              }));
+              
+              // To maintain compatibility with current UI, maybe return the first as "best"
+              // but we need a way to return all. 
+              // Assuming this requires structural changes, for now, follow the requirement to just change the logic.
               return {
                 matched: true,
-                stream: resolvedSource,
+                stream: resolvedSources[0], // Return best (first)
+                allStreams: resolvedSources, // New field for all options
                 matchType: 'stremio_addon',
                 score: 100
               };

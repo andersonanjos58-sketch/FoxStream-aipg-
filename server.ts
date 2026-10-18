@@ -228,7 +228,9 @@ async function startServer() {
       // Forward Range request headers for audio/video seeking support
       const headers: Record<string, string> = {
         'User-Agent': 'IPTVSmartersPro/3.1.5.1 (Linux; Android 12) VLC/3.0.18',
-        'Accept': '*/*'
+        'Accept': '*/*',
+        'Referer': new URL(targetUrl).origin + '/',
+        'Origin': new URL(targetUrl).origin
       };
       if (req.headers.range) {
         headers['Range'] = req.headers.range as string;

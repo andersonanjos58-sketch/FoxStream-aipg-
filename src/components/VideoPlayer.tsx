@@ -52,7 +52,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleError = (msg: string) => {
       console.error('[VideoPlayer] Error:', msg);
-      setError(`${msg} (Verifique o servidor de streaming ou a conexão)`);
+      setError(`${msg} (Se o erro persistir, tente "Abrir Externamente" em um player compatível.)`);
       setLoading(false);
     };
 
@@ -107,6 +107,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       });
     } else {
       // VODs (.mp4, .mkv) or native HTML5 player
+      if (!proxiedUrl) {
+        handleError('URL de vídeo inválida.');
+        return;
+      }
       video.src = proxiedUrl;
       video.crossOrigin = 'anonymous';
 
@@ -117,8 +121,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       };
 
-      video.onerror = () => {
-        handleError('Erro ao carregar o arquivo de vídeo.');
+      video.onerror = (e) => {
+        const errorInfo = video.error ? {
+          code: video.error.code,
+          message: video.error.message,
+          name: video.error.name
+        } : 'Unknown video error';
+        
+        console.error('[VideoPlayer] Video element error event:', e);
+        console.error('[VideoPlayer] Video error details:', errorInfo);
+        
+        let userMessage = 'Erro ao carregar o arquivo de vídeo';
+        if (typeof errorInfo !== 'string' && errorInfo.code === 4) {
+          userMessage = 'Este formato de vídeo não é compatível com o seu navegador';
+        }
+        
+        handleError(`${userMessage}: ${typeof errorInfo === 'string' ? errorInfo : errorInfo.message}`);
       };
     }
 
@@ -285,15 +303,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             >
               <span>Copiar Link do Stream</span>
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                window.open(streamUrl, '_blank');
-              }}
+            <a
+              href={streamUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
             >
               <span>Abrir Externamente</span>
-            </button>
+            </a>
             {onClose && (
               <button
                 type="button"

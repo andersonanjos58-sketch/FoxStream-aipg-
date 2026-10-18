@@ -672,4 +672,16 @@ export const TmdbService = {
       return [];
     }
   },
+  async fetchSeasonEpisodes(id: number | string, seasonNumber: number, apiKey: string = getTmdbApiKey()): Promise<any[]> {
+    try {
+      const url = `${BASE_URL}/tv/${id}/season/${seasonNumber}?api_key=${apiKey}&language=pt-BR`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.episodes || [];
+    } catch (err) {
+      console.warn(`[TMDb Web] Fetch season ${seasonNumber} episodes for ${id} failed:`, err);
+      return [];
+    }
+  },
 };

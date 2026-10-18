@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Play, Heart, Star, Clock, Calendar, Film, Tv, 
   ExternalLink, Copy, Check, Sparkles, AlertCircle, CheckCircle2,
-  Share2, PlayCircle, Info
+  Share2, PlayCircle, Info, Loader2
 } from 'lucide-react';
 import { TmdbMediaItem, ActivePlaybackPayload, StreamSource } from '../types';
 import { TmdbService } from '../services/tmdbService';
@@ -41,9 +41,12 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
   const [loadingDetails, setLoadingDetails] = useState(true);
   const [copied, setCopied] = useState(false);
   const [showTrailer, setShowTrailer] = useState(false);
+  const [selectedSeason, setSelectedSeason] = useState<number>(1);
+  const [episodes, setEpisodes] = useState<any[]>([]);
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
   // Hook for On-Demand Stream Resolution
-  const { state: streamState, stream, isAvailable, isLoading: isStreamLoading, matchType } = useStreamResolver({
+  const { resolve, state: streamState, stream, isAvailable, isLoading: isStreamLoading, matchType } = useStreamResolver({
     tmdbId: mediaId,
     title: details?.title || initialTitle,
     year: details?.year || initialYear,
@@ -54,7 +57,7 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
   // Fetch full details from TMDB
   useEffect(() => {
     let isMounted = true;
-    setLoadingDetails(true);
+    setLoadingEpisodes(true);
 
     const fetchFullDetails = async () => {
       try {
@@ -79,6 +82,17 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
       isMounted = false;
     };
   }, [mediaId, mediaType]);
+
+  // Fetch episodes when season changes
+  useEffect(() => {
+    if (mediaType === 'tv') {
+      setLoadingEpisodes(true);
+      TmdbService.fetchSeasonEpisodes(mediaId, selectedSeason).then(eps => {
+        setEpisodes(eps);
+        setLoadingEpisodes(false);
+      });
+    }
+  }, [selectedSeason, mediaType, mediaId]);
 
   // Handle ESC key to close
   useEffect(() => {
@@ -250,6 +264,51 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
                 </div>
               ) : null}
 
+
+              {/* TV Series Season/Episode Selector */}
+              {mediaType === 'tv' && (
+                <div className="bg-neutral-900/40 p-4 rounded-2xl border border-white/5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-white font-bold">Temporadas</h3>
+                    <select
+                      value={selectedSeason}
+                      onChange={(e) => setSelectedSeason(Number(e.target.value))}
+                      className="bg-neutral-800 text-white text-sm rounded-xl px-3 py-1.5 border border-white/10"
+                    >
+                      {Array.from({ length: details?.numberOfSeasons || 1 }).map((_, i) => (
+                        <option key={i} value={i + 1}>Temporada {i + 1}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {loadingEpisodes ? (
+                    <div className="flex justify-center p-4"><Loader2 className="animate-spin text-orange-500" /></div>
+                  ) : (
+                    <div className="grid gap-2 max-h-96 overflow-y-auto custom-scrollbar pr-2">
+                      {episodes.map(ep => (
+                        <div key={ep.id} className="bg-neutral-800/50 p-3 rounded-xl border border-white/5 flex items-center gap-4">
+                          <div className="w-16 h-9 bg-neutral-700 rounded flex-shrink-0">
+                             {ep.still_path && <img src={`https://image.tmdb.org/t/p/w185${ep.still_path}`} className="w-full h-full object-cover rounded" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-white truncate">{ep.episode_number}. {ep.name}</p>
+                            <p className="text-xs text-neutral-400 line-clamp-1">{ep.overview}</p>
+                          </div>
+                          <button
+                            onClick={async () => {
+                                const resolved = await resolve({ tmdbId: mediaId, type: 'series', seasonNum: selectedSeason, episodeNum: ep.episode_number });
+                            }}
+                            className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
+                          >
+                            Assistir
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Genres */}
               {details?.genres && details.genres.length > 0 && (
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -268,21 +327,54 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
             {/* ACTION ROW: Assistir Agora / Status */}
             <div className="bg-neutral-900/60 p-4 sm:p-5 rounded-2xl border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3 w-full sm:w-auto">
-                {/* Watch Now Button with 3 states */}
+                {/* Watch Now Button / Stream List */}
                 {isAvailable ? (
-                  <button
-                    type="button"
-                    onClick={handlePlayClick}
-                    className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold py-3.5 px-8 rounded-2xl text-base shadow-xl shadow-orange-950/50 hover:shadow-orange-600/30 active:scale-[0.98] transition-all cursor-pointer"
-                  >
-                    <Play className="w-5 h-5 fill-white stroke-none" />
-                    <span>Assistir Agora</span>
-                    {stream?.quality && (
-                      <span className="text-xs bg-black/30 px-2 py-0.5 rounded font-mono">
-                        {stream.quality}
-                      </span>
+                  <div className="w-full flex flex-col gap-2">
+                    {/* If allStreams exists, show all. If not, fallback to single stream */}
+                    {streamState.allStreams && streamState.allStreams.length > 1 ? (
+                      streamState.allStreams.map((s: any, idx: number) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            if (!s.streamUrl) {
+                              alert('Este stream não possui um link de reprodução válido.');
+                              return;
+                            }
+                            const payload: ActivePlaybackPayload = {
+                              tmdbId: typeof mediaId === 'number' ? mediaId : parseInt(String(mediaId), 10) || 0,
+                              title,
+                              posterPath: poster || '',
+                              backdropPath: backdrop || '',
+                              streamUrl: s.streamUrl,
+                              format: s.format,
+                              type: s.type || (mediaType === 'tv' ? 'series' : 'movie'),
+                              seriesName: mediaType === 'tv' ? title : undefined,
+                            };
+                            onPlay(payload);
+                          }}
+                          className="flex items-center justify-between gap-3 bg-neutral-800 hover:bg-neutral-700 text-white font-semibold py-3 px-5 rounded-xl text-sm transition-all"
+                        >
+                          <span className="truncate" style={{ whiteSpace: 'pre-line' }}>{s.title || s.quality}</span>
+                          <Play className="w-4 h-4 fill-white stroke-none" />
+                        </button>
+                      ))
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handlePlayClick}
+                        className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-orange-500 via-orange-600 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold py-3.5 px-8 rounded-2xl text-base shadow-xl shadow-orange-950/50 hover:shadow-orange-600/30 active:scale-[0.98] transition-all cursor-pointer"
+                      >
+                        <Play className="w-5 h-5 fill-white stroke-none" />
+                        <span>Assistir Agora</span>
+                        {stream?.quality && (
+                          <span className="text-xs bg-black/30 px-2 py-0.5 rounded font-mono">
+                            {stream.quality}
+                          </span>
+                        )}
+                      </button>
                     )}
-                  </button>
+                  </div>
                 ) : isStreamLoading ? (
                   <button
                     type="button"
