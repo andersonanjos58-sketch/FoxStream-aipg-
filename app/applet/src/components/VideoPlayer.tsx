@@ -14,60 +14,78 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, autoPlay = true }) => {
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !url) return;
 
     const proxiedUrl = formatStreamUrl(url);
     setError(null);
     setLoading(true);
 
-    if (Hls.isSupported() && (url.includes('.m3u8') || url.includes('.ts'))) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-      });
+    const isHlsStream = url.includes('.m3u8') || url.includes('/live/');
+    
+    console.log("FoxStream Player - URL Original:", url);
+    console.log("FoxStream Player - URL Proxied:", proxiedUrl);
+    console.log("FoxStream Player - É HLS/Live?:", isHlsStream);
 
-      hls.loadSource(proxiedUrl);
-      hls.attachMedia(video);
+    let hlsInstance: Hls | null = null;
 
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    // Helper for error messages
+    const handleError = (msg: string) => {
+        console.error("FoxStream Player Error:", msg);
+        setError(`${msg} (Verifique autenticação ou link)`);
         setLoading(false);
-        if (autoPlay) video.play().catch(console.error);
+    };
+
+    if (isHlsStream && Hls.isSupported()) {
+      hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
+      hlsInstance.loadSource(proxiedUrl);
+      hlsInstance.attachMedia(video);
+
+      hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+        setLoading(false);
+        if (autoPlay) video.play().catch(e => console.error("AutoPlay failed:", e));
       });
 
-      hls.on(Hls.Events.ERROR, (_, data) => {
+      hlsInstance.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          setError('Erro ao carregar o sinal do canal.');
-          setLoading(false);
-          hls.destroy();
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response?.code === 401) {
+            handleError('Erro 401: Autenticação necessária ou falha.');
+          } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.response?.code === 403) {
+            handleError('Erro 403: Acesso negado pelo servidor.');
+          } else {
+            handleError('Erro ao carregar o fluxo HLS.');
+          }
+          hlsInstance?.destroy();
         }
       });
-
-      return () => {
-        hls.destroy();
-      };
-    } else if (video.canPlayType('application/vnd.apple.mpegurl') || url.match(/\.(mp4|mkv)$/)) {
-      // Fallback for native support or standard video files
-      video.src = proxiedUrl;
-      video.onloadeddata = () => setLoading(false);
-      video.onerror = () => {
-        setError('Erro ao reproduzir a mídia.');
-        setLoading(false);
-      };
     } else {
-      setError('Formato de mídia não suportado.');
-      setLoading(false);
+      // VODs: Use native player
+      video.src = proxiedUrl;
+      video.crossOrigin = 'anonymous'; // Critical for CORS
+      video.onloadeddata = () => {
+        setLoading(false);
+        if (autoPlay) video.play().catch(e => console.error("AutoPlay failed:", e));
+      };
+      video.onerror = () => {
+        // Can't reliably check 401/403 status codes on video element error
+        handleError('Erro ao carregar a mídia VOD.');
+      };
     }
+
+    return () => {
+      if (hlsInstance) hlsInstance.destroy();
+      video.src = '';
+    };
   }, [url, autoPlay]);
 
   return (
     <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center text-white bg-black/70 z-10">
-          Carregando sinal...
+        <div className="absolute inset-0 flex items-center justify-center text-white bg-black/70 z-10 text-sm">
+          A carregar...
         </div>
       )}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center text-red-500 bg-black/70 z-10">
+        <div className="absolute inset-0 flex items-center justify-center text-red-400 bg-black/80 z-10 text-center p-4 text-sm">
           {error}
         </div>
       )}
