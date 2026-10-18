@@ -124,8 +124,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.onerror = (e) => {
         const errorInfo = video.error ? {
           code: video.error.code,
-          message: video.error.message,
-          name: video.error.name
+          message: video.error.message
         } : 'Unknown video error';
         
         console.error('[VideoPlayer] Video element error event:', e);

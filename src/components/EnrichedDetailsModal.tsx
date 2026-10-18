@@ -42,16 +42,42 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [showTrailer, setShowTrailer] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
+  const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
   const [episodes, setEpisodes] = useState<any[]>([]);
+  const [episodeStreams, setEpisodeStreams] = useState<any[]>([]);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+  const [isEpisodeStreamLoading, setIsLoadingStreams] = useState(false);
+
+  const handleSelectEpisode = async (episodeNumber: number) => {
+    setSelectedEpisode(episodeNumber);
+    setIsLoadingStreams(true);
+    setEpisodeStreams([]);
+
+    try {
+      const imdbId = await TmdbService.fetchExternalIds(mediaId, 'tv');
+      if (!imdbId) throw new Error("Could not find IMDb ID");
+      
+      const addonBaseUrl = localStorage.getItem('foxstream_active_addon_url')?.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '') || '';
+      
+      const endpoint = `${addonBaseUrl}/stream/series/${imdbId}:${selectedSeason}:${episodeNumber}.json`;
+      const res = await fetch(endpoint);
+      const data = await res.json();
+      setEpisodeStreams(data.streams || []);
+    } catch (err) {
+      console.error("Failed to load episode streams", err);
+      setEpisodeStreams([]);
+    } finally {
+      setIsLoadingStreams(false);
+    }
+  };
 
   // Hook for On-Demand Stream Resolution
-  const { resolve, state: streamState, stream, isAvailable, isLoading: isStreamLoading, matchType } = useStreamResolver({
+  const { resolve, state: streamVerificationState, stream, allStreams, isAvailable, isLoading: isStreamLoading, matchType } = useStreamResolver({
     tmdbId: mediaId,
     title: details?.title || initialTitle,
     year: details?.year || initialYear,
     type: mediaType === 'tv' ? 'series' : 'movie',
-    autoResolve: true,
+    autoResolve: mediaType === 'movie', // Only auto-resolve for movies
   });
 
   // Fetch full details from TMDB
@@ -295,15 +321,50 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
                             <p className="text-xs text-neutral-400 line-clamp-1">{ep.overview}</p>
                           </div>
                           <button
-                            onClick={async () => {
-                                const resolved = await resolve({ tmdbId: mediaId, type: 'series', seasonNum: selectedSeason, episodeNum: ep.episode_number });
-                            }}
+                            onClick={() => handleSelectEpisode(ep.episode_number)}
                             className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg"
                           >
                             Assistir
                           </button>
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {/* Episode Streams Options */}
+                  {selectedEpisode !== null && (
+                    <div className="mt-4 border-t border-white/10 pt-4">
+                      <h4 className="text-white font-semibold mb-3">Opções de Transmissão - Ep {selectedEpisode}</h4>
+                      {isEpisodeStreamLoading ? (
+                        <div className="flex justify-center p-4"><Loader2 className="animate-spin text-orange-500" /></div>
+                      ) : episodeStreams.length > 0 ? (
+                        <div className="flex flex-col gap-2">
+                          {episodeStreams.map((s, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                const payload: ActivePlaybackPayload = {
+                                  tmdbId: typeof mediaId === 'number' ? mediaId : parseInt(String(mediaId), 10) || 0,
+                                  title: `${details?.title || initialTitle} - T${selectedSeason} E${selectedEpisode}`,
+                                  posterPath: poster || '',
+                                  backdropPath: backdrop || '',
+                                  streamUrl: s.url || (s.infoHash ? `magnet:?xt=urn:btih:${s.infoHash}` : ''),
+                                  format: 'mp4',
+                                  type: 'series',
+                                  seriesName: details?.title || initialTitle,
+                                };
+                                onPlay(payload);
+                              }}
+                              className="flex items-center justify-between gap-3 bg-neutral-800 hover:bg-neutral-700 text-white font-semibold py-3 px-5 rounded-xl text-sm transition-all"
+                            >
+                              <span className="truncate" style={{ whiteSpace: 'pre-line' }}>{s.title || s.name || 'Stream'}</span>
+                              <Play className="w-4 h-4 fill-white stroke-none" />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-neutral-400">Nenhum stream disponível para este episódio.</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -328,11 +389,12 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
             <div className="bg-neutral-900/60 p-4 sm:p-5 rounded-2xl border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3 w-full sm:w-auto">
                 {/* Watch Now Button / Stream List */}
-                {isAvailable ? (
+                {mediaType === 'movie' ? (
+                  isAvailable ? (
                   <div className="w-full flex flex-col gap-2">
                     {/* If allStreams exists, show all. If not, fallback to single stream */}
-                    {streamState.allStreams && streamState.allStreams.length > 1 ? (
-                      streamState.allStreams.map((s: any, idx: number) => (
+                    {allStreams && allStreams.length > 1 ? (
+                      allStreams.map((s: any, idx: number) => (
                         <button
                           key={idx}
                           type="button"
@@ -348,8 +410,8 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
                               backdropPath: backdrop || '',
                               streamUrl: s.streamUrl,
                               format: s.format,
-                              type: s.type || (mediaType === 'tv' ? 'series' : 'movie'),
-                              seriesName: mediaType === 'tv' ? title : undefined,
+                              type: 'movie',
+                              seriesName: undefined,
                             };
                             onPlay(payload);
                           }}
@@ -396,7 +458,8 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
                       <span>Conteúdo indisponível no momento</span>
                     </button>
                   </div>
-                )}
+                )
+                ) : null}
 
                 {/* Trailer Button */}
                 {details?.trailerUrl && (
