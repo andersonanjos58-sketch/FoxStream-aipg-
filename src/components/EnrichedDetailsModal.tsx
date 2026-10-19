@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Play, Heart, Star, Clock, Calendar, Film, Tv, 
   ExternalLink, Copy, Check, Sparkles, AlertCircle, CheckCircle2,
-  Share2, PlayCircle, Info, Loader2, ChevronRight
+  Share2, PlayCircle, Info, Loader2, ChevronRight, ArrowLeft, RefreshCw
 } from 'lucide-react';
 import { TmdbMediaItem, ActivePlaybackPayload, StreamSource } from '../types';
 import { TmdbService } from '../services/tmdbService';
@@ -49,28 +49,67 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
   const [isEpisodeStreamLoading, setIsLoadingStreams] = useState(false);
   const [currentView, setCurrentView] = useState<'overview' | 'episode_details'>('overview');
 
-  const handleSelectEpisode = async (episode: any) => {
-    setSelectedEpisode(episode);
-    setCurrentView('episode_details');
+  const fetchEpisodeStreams = async (episode: any, seasonNum?: number) => {
+    if (!episode) return;
     setIsLoadingStreams(true);
     setEpisodeStreams([]);
 
+    const seasonNumber = seasonNum || selectedSeason || 1;
+    const episodeNumber = episode.episode_number || 1;
+
     try {
-      const imdbId = await TmdbService.fetchExternalIds(mediaId, 'tv');
-      if (!imdbId) throw new Error("Could not find IMDb ID");
-      
-      const addonBaseUrl = localStorage.getItem('foxstream_active_addon_url')?.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '') || '';
-      
-      const endpoint = `${addonBaseUrl}/stream/series/${imdbId}:${selectedSeason}:${episode.episode_number}.json`;
-      const res = await fetch(endpoint);
-      const data = await res.json();
-      setEpisodeStreams(data.streams || []);
+      // 1. Resolve IMDb ID with fallback to tmdb:{id}
+      let imdbId: string | null = null;
+      if (typeof mediaId === 'string' && mediaId.startsWith('tt')) {
+        imdbId = mediaId;
+      } else {
+        imdbId = await TmdbService.fetchExternalIds(mediaId, 'tv');
+      }
+
+      const seriesIdentifier = imdbId || `tmdb:${mediaId}`;
+
+      // 2. Resolve Addon Base URL with default fallback
+      const DEFAULT_ADDON_URL = 'https://torrentio.strem.fun/manifest.json';
+      let storedAddon: string | null = null;
+      try {
+        storedAddon = localStorage.getItem('foxstream_active_addon_url');
+      } catch {}
+      const addonUrl = (storedAddon && storedAddon.trim()) ? storedAddon.trim() : DEFAULT_ADDON_URL;
+      const baseUrl = addonUrl.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
+
+      // 3. Construct exact Stremio series endpoint
+      const streamEndpoint = `${baseUrl}/stream/series/${seriesIdentifier}:${seasonNumber}:${episodeNumber}.json`;
+      console.log("Fetching episode streams from:", streamEndpoint);
+
+      let data: any = null;
+      try {
+        const res = await fetch(streamEndpoint, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = await res.json();
+      } catch (directErr) {
+        console.warn("[EpisodeStreams] Direct fetch failed, trying via CORS proxy:", directErr);
+        const proxyUrl = `/api/proxy?url=${encodeURIComponent(streamEndpoint)}`;
+        const res = await fetch(proxyUrl, { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          data = await res.json();
+        } else {
+          throw new Error(`Proxy fetch failed: ${res.status}`);
+        }
+      }
+
+      setEpisodeStreams(data?.streams || []);
     } catch (err) {
-      console.error("Failed to load episode streams", err);
+      console.error("Error fetching series streams:", err);
       setEpisodeStreams([]);
     } finally {
       setIsLoadingStreams(false);
     }
+  };
+
+  const handleSelectEpisode = (episode: any) => {
+    setSelectedEpisode(episode);
+    setCurrentView('episode_details');
+    fetchEpisodeStreams(episode, selectedSeason);
   };
 
   // Hook for On-Demand Stream Resolution
@@ -259,9 +298,6 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
 
           {/* Details Body Content */}
           <div className="p-4 sm:p-8 space-y-6">
-          {/* Details Body Content */}
-          <div className="p-4 sm:p-8 space-y-6">
-            
             {currentView === 'overview' ? (
               <>
                 {/* Meta tags bar */}
@@ -353,61 +389,164 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
               </>
             ) : (
               /* Episode Details View */
-              <div className="space-y-4">
-                 <button onClick={() => setCurrentView('overview')} className="flex items-center gap-2 text-white font-semibold hover:text-orange-400">
-                    <ChevronRight className="rotate-180" /> Voltar para temporadas
-                 </button>
-                 <h2 className="text-2xl font-bold text-white">S{selectedSeason}E{selectedEpisode?.episode_number} - {selectedEpisode?.name}</h2>
-                 <p className="text-sm text-neutral-300">{selectedEpisode?.overview}</p>
-                 
-                 {/* Episode Streams Options */}
-                 <h4 className="text-white font-semibold mb-3">Opções de Transmissão</h4>
-                 {isEpisodeStreamLoading ? (
-                    <div className="flex justify-center p-4"><Loader2 className="animate-spin text-orange-500" /></div>
-                 ) : episodeStreams.length > 0 ? (
-                   <div className="w-full flex flex-col gap-3 px-4 py-2">
-                     {episodeStreams.map((s, idx) => (
-                       <button
-                         key={idx}
-                         type="button"
-                         onClick={() => {
-                           const payload: ActivePlaybackPayload = {
-                             tmdbId: typeof mediaId === 'number' ? mediaId : parseInt(String(mediaId), 10) || 0,
-                             title: `${details?.title || initialTitle} - T${selectedSeason} E${selectedEpisode?.episode_number} - ${selectedEpisode?.name}`,
-                             posterPath: poster || '',
-                             backdropPath: backdrop || '',
-                             streamUrl: s.url || (s.infoHash ? `magnet:?xt=urn:btih:${s.infoHash}` : ''),
-                             format: 'mp4',
-                             type: 'series',
-                             seriesName: details?.title || initialTitle,
-                           };
-                           onPlay(payload);
-                         }}
-                         className="w-full flex items-center gap-4 p-3.5 bg-slate-800/80 hover:bg-slate-700/90 border border-slate-700/60 rounded-xl transition-all text-left shadow-sm group"
-                       >
-                         <div className="flex-shrink-0 w-10 h-10 rounded-full bg-orange-500/20 text-orange-400 group-hover:bg-orange-500 group-hover:text-white flex items-center justify-center transition-colors">
-                           <Play className="w-5 h-5 fill-current ml-0.5"/>
-                         </div>
-                         <div className="flex-1 min-w-0 flex flex-col gap-1">
-                           <div className="text-sm font-semibold text-white truncate">{s.name || 'Stream Option'}</div>
-                           <div className="text-xs text-slate-300 whitespace-pre-line leading-relaxed">{s.title || s.quality}</div>
-                         </div>
-                         <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors flex-shrink-0"/>
-                       </button>
-                     ))}
-                   </div>
-                 ) : (
-                   <p className="text-sm text-neutral-400">Nenhum stream disponível para este episódio.</p>
-                 )}
+              <div className="space-y-6 animate-in fade-in duration-200">
+                {/* Back Button */}
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setCurrentView('overview');
+                    setEpisodeStreams([]);
+                  }} 
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white text-xs sm:text-sm font-semibold border border-white/10 transition-all cursor-pointer hover:border-orange-500/40"
+                >
+                  <ArrowLeft className="w-4 h-4 text-orange-400" />
+                  <span>Voltar para Temporadas e Episódios</span>
+                </button>
+
+                {/* Episode Header & Info Card */}
+                <div className="flex flex-col sm:flex-row gap-4 p-4 rounded-2xl bg-neutral-900/60 border border-white/10">
+                  {selectedEpisode?.still_path ? (
+                    <div className="w-full sm:w-56 aspect-video rounded-xl overflow-hidden bg-neutral-950 shrink-0 border border-white/10 shadow-lg">
+                      <img
+                        src={`https://image.tmdb.org/t/p/w500${selectedEpisode.still_path}`}
+                        alt={selectedEpisode.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : backdrop ? (
+                    <div className="w-full sm:w-56 aspect-video rounded-xl overflow-hidden bg-neutral-950 shrink-0 border border-white/10 shadow-lg">
+                      <img
+                        src={backdrop}
+                        alt={title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className="flex-1 min-w-0 flex flex-col justify-center">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                        Temporada {selectedSeason} • Episódio {selectedEpisode?.episode_number}
+                      </span>
+                      {selectedEpisode?.air_date && (
+                        <span className="text-[11px] text-neutral-400 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {selectedEpisode.air_date}
+                        </span>
+                      )}
+                      {selectedEpisode?.vote_average ? (
+                        <span className="text-[11px] text-amber-400 font-bold flex items-center gap-1">
+                          <Star className="w-3 h-3 fill-amber-400" />
+                          {Number(selectedEpisode.vote_average).toFixed(1)}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                      S{selectedSeason}E{selectedEpisode?.episode_number} - {selectedEpisode?.name || `Episódio ${selectedEpisode?.episode_number}`}
+                    </h2>
+
+                    <p className="text-xs sm:text-sm text-neutral-300 font-light mt-2 leading-relaxed">
+                      {selectedEpisode?.overview || 'Sinopse não disponível para este episódio.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Episode Streams Options Section */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-orange-400" />
+                      <span>Opções de Transmissão (Stremio Add-on)</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => fetchEpisodeStreams(selectedEpisode, selectedSeason)}
+                      disabled={isEpisodeStreamLoading}
+                      className="text-xs text-neutral-400 hover:text-white flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                      title="Recarregar streams"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isEpisodeStreamLoading ? 'animate-spin' : ''}`} />
+                      <span>Atualizar</span>
+                    </button>
+                  </div>
+
+                  {isEpisodeStreamLoading ? (
+                    <div className="flex flex-col items-center justify-center p-8 bg-neutral-900/40 rounded-2xl border border-white/5 space-y-3">
+                      <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
+                      <p className="text-sm text-neutral-300 font-medium animate-pulse">
+                        Buscando streams no Add-on Stremio...
+                      </p>
+                    </div>
+                  ) : episodeStreams.length > 0 ? (
+                    <div className="w-full flex flex-col gap-3">
+                      {episodeStreams.map((s, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            const streamUrl = s.url || s.streamUrl || (s.infoHash ? `magnet:?xt=urn:btih:${s.infoHash}` : '');
+                            if (!streamUrl) {
+                              alert('Este stream não possui um link de reprodução válido.');
+                              return;
+                            }
+                            const payload: ActivePlaybackPayload = {
+                              tmdbId: typeof mediaId === 'number' ? mediaId : parseInt(String(mediaId), 10) || 0,
+                              title: `${details?.title || initialTitle} - S${selectedSeason}E${selectedEpisode?.episode_number} - ${selectedEpisode?.name || 'Episódio'}`,
+                              posterPath: selectedEpisode?.still_path ? `https://image.tmdb.org/t/p/w500${selectedEpisode.still_path}` : (poster || ''),
+                              backdropPath: selectedEpisode?.still_path ? `https://image.tmdb.org/t/p/w1280${selectedEpisode.still_path}` : (backdrop || ''),
+                              streamUrl,
+                              format: 'mp4',
+                              type: 'series',
+                              seriesName: details?.title || initialTitle,
+                              seasonEpisode: `S${selectedSeason}E${selectedEpisode?.episode_number}`,
+                            };
+                            onPlay(payload);
+                          }}
+                          className="w-full flex items-center gap-4 p-3.5 bg-slate-800/80 hover:bg-slate-700/90 border border-slate-700/60 rounded-xl transition-all text-left shadow-sm group cursor-pointer"
+                        >
+                          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-orange-500/20 text-orange-400 group-hover:bg-orange-500 group-hover:text-white flex items-center justify-center transition-colors">
+                            <Play className="w-5 h-5 fill-current ml-0.5" />
+                          </div>
+                          <div className="flex-1 min-w-0 flex flex-col gap-1">
+                            <div className="text-sm font-semibold text-white truncate">
+                              {s.name || s.title || `Opção ${idx + 1}`}
+                            </div>
+                            <div className="text-xs text-slate-300 whitespace-pre-line leading-relaxed">
+                              {s.title || s.quality || 'Qualidade Padrão'}
+                            </div>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors flex-shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-6 text-center bg-neutral-900/40 rounded-2xl border border-white/5 space-y-3">
+                      <AlertCircle className="w-7 h-7 text-neutral-400 mx-auto" />
+                      <p className="text-sm text-neutral-300 font-medium">
+                        Nenhum stream disponível para este episódio.
+                      </p>
+                      <p className="text-xs text-neutral-500 max-w-sm mx-auto">
+                        O Add-on Stremio não retornou fontes ativas para este episódio específico.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => fetchEpisodeStreams(selectedEpisode, selectedSeason)}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition-all cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Tentar novamente</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-            
-            {/* Meta tags bar + Genres ... move to overview view */}
 
-            </div>
-
-            {/* ACTION ROW: Assistir Agora / Status */}
-            <div className="bg-neutral-900/60 p-4 sm:p-5 rounded-2xl border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* ACTION ROW, Synopsis, and Cast for Overview View */}
+            {currentView === 'overview' && (
+              <>
+                <div className="bg-neutral-900/60 p-4 sm:p-5 rounded-2xl border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3 w-full sm:w-auto">
                 {/* Watch Now Button / Stream List */}
                 {mediaType === 'movie' ? (
@@ -611,6 +750,8 @@ export const EnrichedDetailsModal: React.FC<EnrichedDetailsModalProps> = ({
                   ))}
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
         </div>

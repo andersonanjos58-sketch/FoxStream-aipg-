@@ -230,8 +230,11 @@ export class StreamResolverService {
       }
     } catch {}
 
-    if (activeAddonUrl && (activeAddonUrl.includes('manifest.json') || activeAddonUrl.endsWith('/'))) {
-      const addonBase = activeAddonUrl.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
+    const DEFAULT_ADDON_URL = 'https://torrentio.strem.fun/manifest.json';
+    const effectiveAddonUrl = (activeAddonUrl && activeAddonUrl.trim()) ? activeAddonUrl.trim() : DEFAULT_ADDON_URL;
+
+    if (effectiveAddonUrl && (effectiveAddonUrl.includes('manifest.json') || effectiveAddonUrl.endsWith('/'))) {
+      const addonBase = effectiveAddonUrl.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
       const mediaType = type === 'series' ? 'series' : 'movie';
       
       let imdbId: string | null = null;
@@ -243,14 +246,16 @@ export class StreamResolverService {
         }
       }
 
-      if (imdbId) {
+      const mediaIdentifier = imdbId || (tmdbId ? `tmdb:${tmdbId}` : null);
+
+      if (mediaIdentifier) {
         let streamProtocolUrl = '';
         if (mediaType === 'series') {
           const sNum = seasonNum || 1;
           const eNum = episodeNum || 1;
-          streamProtocolUrl = `${addonBase}/stream/series/${imdbId}:${sNum}:${eNum}.json`;
+          streamProtocolUrl = `${addonBase}/stream/series/${mediaIdentifier}:${sNum}:${eNum}.json`;
         } else {
-          streamProtocolUrl = `${addonBase}/stream/movie/${imdbId}.json`;
+          streamProtocolUrl = `${addonBase}/stream/movie/${mediaIdentifier}.json`;
         }
 
         console.log('[StreamResolver] Stremio Protocol Request:', streamProtocolUrl);
