@@ -23,6 +23,7 @@ sealed class MovieDetailsUiState {
         val tmdbData: TmdbResult? = null,
         val isLoadingTmdb: Boolean = true,
         val streamSource: StreamSource? = null,
+        val allStreams: List<StreamSource> = emptyList(),
         val isStreamAvailable: Boolean = false,
         val isResolvingStream: Boolean = false
     ) : MovieDetailsUiState()
@@ -41,23 +42,45 @@ class MovieDetailsViewModel : ViewModel() {
                 movie = localMovie,
                 tmdbData = null,
                 isLoadingTmdb = true,
-                streamSource = null,
+                streamSource = if (localMovie.streamUrl.isNotBlank()) {
+                    StreamSource(
+                        id = localMovie.id,
+                        title = localMovie.name,
+                        type = "movie",
+                        streamUrl = localMovie.streamUrl,
+                        quality = "HD",
+                        name = "Stream Direto"
+                    )
+                } else null,
+                allStreams = if (localMovie.streamUrl.isNotBlank()) {
+                    listOf(
+                        StreamSource(
+                            id = localMovie.id,
+                            title = localMovie.name,
+                            type = "movie",
+                            streamUrl = localMovie.streamUrl,
+                            quality = "HD",
+                            name = "Stream Direto"
+                        )
+                    )
+                } else emptyList(),
                 isStreamAvailable = localMovie.streamUrl.isNotBlank(),
-                isResolvingStream = localMovie.streamUrl.isBlank()
+                isResolvingStream = true
             )
 
             // 2. Dispara a busca no TMDB em background sem bloquear a UI
-            fetchTmdbDetails(localMovie.name, localMovie.year)
-
-            // 3. Se não tiver streamUrl direto, resolve sob demanda no streams.json
-            if (localMovie.streamUrl.isBlank()) {
-                resolveStream(context, localMovie.name, localMovie.year)
-            }
+            fetchTmdbDetails(context, localMovie)
         }
     }
 
-    private fun resolveStream(context: Context, title: String, year: String?, tmdbId: String? = null) {
+    fun resolveStream(context: Context, title: String, year: String?, tmdbId: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { current ->
+                if (current is MovieDetailsUiState.Success) {
+                    current.copy(isResolvingStream = true)
+                } else current
+            }
+
             val state = StreamResolver.resolveStream(
                 context = context,
                 tmdbId = tmdbId,
@@ -69,14 +92,18 @@ class MovieDetailsViewModel : ViewModel() {
             _uiState.update { current ->
                 if (current is MovieDetailsUiState.Success) {
                     when (state) {
-                        is StreamResolutionState.Available -> current.copy(
-                            streamSource = state.stream,
-                            isStreamAvailable = true,
-                            isResolvingStream = false
-                        )
+                        is StreamResolutionState.Available -> {
+                            val existingStreams = current.allStreams
+                            val combined = (state.allStreams + existingStreams)
+                                .distinctBy { it.streamUrl }
+                            current.copy(
+                                streamSource = state.stream,
+                                allStreams = combined,
+                                isStreamAvailable = true,
+                                isResolvingStream = false
+                            )
+                        }
                         else -> current.copy(
-                            streamSource = null,
-                            isStreamAvailable = false,
                             isResolvingStream = false
                         )
                     }
@@ -85,10 +112,10 @@ class MovieDetailsViewModel : ViewModel() {
         }
     }
 
-    private fun fetchTmdbDetails(rawTitle: String, rawYear: String? = null) {
+    private fun fetchTmdbDetails(context: Context, localMovie: MovieItem) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val tmdbDetails = TmdbApiClient.getMovieDetails(rawTitle, rawYear)
+                val tmdbDetails = TmdbApiClient.getMovieDetails(localMovie.name, localMovie.year)
                 
                 _uiState.update { currentState ->
                     if (currentState is MovieDetailsUiState.Success) {
@@ -98,12 +125,18 @@ class MovieDetailsViewModel : ViewModel() {
                         )
                     } else currentState
                 }
+
+                // Resolve streams using TMDB info (IMDb ID or TMDb ID)
+                val tmdbId = tmdbDetails?.imdbId ?: tmdbDetails?.tmdbId?.toString()
+                resolveStream(context, localMovie.name, localMovie.year, tmdbId)
             } catch (e: Exception) {
                 _uiState.update { currentState ->
                     if (currentState is MovieDetailsUiState.Success) {
                         currentState.copy(isLoadingTmdb = false)
                     } else currentState
                 }
+                // Fallback resolution with title/year only
+                resolveStream(context, localMovie.name, localMovie.year, null)
             }
         }
     }

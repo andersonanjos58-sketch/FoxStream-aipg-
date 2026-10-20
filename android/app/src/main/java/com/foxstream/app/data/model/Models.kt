@@ -70,7 +70,8 @@ data class EpisodeItem(
     val streamUrl: String,
     val duration: String? = null,
     val overview: String? = null,
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val thumbnail: String? = null
 )
 
 data class SeasonItem(

@@ -436,7 +436,7 @@ object TmdbApiClient {
     }
 
     private fun fetchTvDetails(id: Int, apiKey: String, token: String): TmdbResult? {
-        val url = "$BASE_URL/tv/$id?language=pt-BR&append_to_response=credits"
+        val url = "$BASE_URL/tv/$id?language=pt-BR&append_to_response=credits,external_ids"
         val json = fetchJson(url, apiKey, token) ?: return null
 
         val title = json.optString("name", null)?.takeIf { it.isNotBlank() }
@@ -492,6 +492,9 @@ object TmdbApiClient {
         val rating = if (voteAvg > 0.0) String.format(Locale.US, "%.1f/10", voteAvg) else null
         val voteCount = json.optInt("vote_count", 0).takeIf { it > 0 }?.toString()
 
+        val externalIds = json.optJSONObject("external_ids")
+        val imdbId = externalIds?.optString("imdb_id", null)?.takeIf { it.isNotBlank() && it != "null" }
+
         return TmdbResult(
             title = title,
             originalTitle = origTitle,
@@ -506,8 +509,54 @@ object TmdbApiClient {
             rating = rating,
             voteCount = voteCount,
             tmdbId = id,
-            imdbId = null
+            imdbId = imdbId
         )
+    }
+
+    suspend fun fetchExternalIds(tmdbId: Int, isTv: Boolean): String? = withContext(Dispatchers.IO) {
+        val (apiKey, token) = getAuthCredentials()
+        val typeStr = if (isTv) "tv" else "movie"
+        val url = "$BASE_URL/$typeStr/$tmdbId/external_ids"
+        val json = fetchJson(url, apiKey, token) ?: return@withContext null
+        json.optString("imdb_id", null)?.takeIf { it.isNotBlank() && it != "null" }
+    }
+
+    suspend fun fetchSeasonEpisodes(tmdbId: Int, seasonNumber: Int): List<com.foxstream.app.data.model.EpisodeItem> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<com.foxstream.app.data.model.EpisodeItem>()
+        try {
+            val (apiKey, token) = getAuthCredentials()
+            val url = "$BASE_URL/tv/$tmdbId/season/$seasonNumber?language=pt-BR"
+            val json = fetchJson(url, apiKey, token) ?: return@withContext emptyList()
+            val epsArr = json.optJSONArray("episodes") ?: return@withContext emptyList()
+            for (i in 0 until epsArr.length()) {
+                val ep = epsArr.getJSONObject(i)
+                val epNum = ep.optInt("episode_number", i + 1)
+                val sNum = ep.optInt("season_number", seasonNumber)
+                val title = ep.optString("name", "Episódio $epNum")
+                val overview = ep.optString("overview", null)?.takeIf { it.isNotBlank() }
+                val runtime = ep.optInt("runtime", 0).takeIf { it > 0 }
+                val durationStr = runtime?.let { "${it}m" }
+                val stillPath = ep.optString("still_path", null)?.takeIf { it.isNotBlank() && it != "null" }
+                val thumbnail = stillPath?.let { "$POSTER_BASE_URL$it" }
+
+                list.add(
+                    com.foxstream.app.data.model.EpisodeItem(
+                        id = "tmdb_${tmdbId}_s${sNum}_e${epNum}",
+                        seriesId = tmdbId.toString(),
+                        title = title,
+                        seasonNum = sNum,
+                        episodeNum = epNum,
+                        streamUrl = "",
+                        duration = durationStr,
+                        overview = overview,
+                        thumbnail = thumbnail
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching season $seasonNumber episodes for TV $tmdbId: ${e.message}", e)
+        }
+        list
     }
 
     private const val DEFAULT_API_KEY = "6fb6ba516b5df9841c2ac73a2974bbfb"

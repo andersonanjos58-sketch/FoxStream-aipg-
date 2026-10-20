@@ -313,22 +313,26 @@ object SmartMatch {
      * Minimum required score: 85.
      */
     fun evaluate(
-        localRawName: String,
-        localCategory: String,
-        localRawYear: String?,
-        tmdbTitle: String,
-        tmdbOriginalTitle: String?,
-        tmdbYear: String?,
-        tmdbGenres: String? = null
-    ): SmartMatchResult = evaluateMatch(
-        localRawName = localRawName,
-        localCategory = localCategory,
-        localRawYear = localRawYear,
-        tmdbTitle = tmdbTitle,
-        tmdbOriginalTitle = tmdbOriginalTitle,
-        tmdbYear = tmdbYear,
-        tmdbGenres = tmdbGenres
-    )
+        localRawName: String = "",
+        localCategory: String = "",
+        localRawYear: String? = null,
+        tmdbTitle: String = "",
+        tmdbOriginalTitle: String? = null,
+        tmdbYear: String? = null,
+        tmdbGenres: String? = null,
+        localRawTitle: String? = null
+    ): SmartMatchResult {
+        val effectiveName = if (!localRawTitle.isNullOrBlank()) localRawTitle else localRawName
+        return evaluateMatch(
+            localRawName = effectiveName,
+            localCategory = localCategory,
+            localRawYear = localRawYear,
+            tmdbTitle = tmdbTitle,
+            tmdbOriginalTitle = tmdbOriginalTitle,
+            tmdbYear = tmdbYear,
+            tmdbGenres = tmdbGenres
+        )
+    }
 
     fun evaluateMatch(
         localRawName: String,

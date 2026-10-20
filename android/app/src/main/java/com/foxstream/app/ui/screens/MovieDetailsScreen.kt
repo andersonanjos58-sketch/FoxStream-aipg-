@@ -77,6 +77,37 @@ fun MovieDetailsScreen(
         }
     }
 
+    var availableStreams by remember { mutableStateOf<List<com.foxstream.app.util.StreamSource>>(emptyList()) }
+    var showStreamOptionsSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentMovie.id, currentMovie.name) {
+        val direct = if (currentMovie.streamUrl.isNotBlank()) {
+            listOf(
+                com.foxstream.app.util.StreamSource(
+                    id = currentMovie.id,
+                    title = currentMovie.name,
+                    type = "movie",
+                    streamUrl = currentMovie.streamUrl,
+                    quality = "HD",
+                    name = "Stream Direto"
+                )
+            )
+        } else emptyList()
+
+        val res = com.foxstream.app.util.StreamResolver.resolveStream(
+            context = context,
+            title = currentMovie.name,
+            year = currentMovie.year,
+            type = "movie"
+        )
+
+        val resolved = if (res is com.foxstream.app.util.StreamResolutionState.Available) {
+            res.allStreams
+        } else emptyList()
+
+        availableStreams = (direct + resolved).distinctBy { it.streamUrl }
+    }
+
     val scrollState = rememberScrollState()
     val configuration = LocalConfiguration.current
     val screenHeight = configuration.screenHeightDp.dp
@@ -246,14 +277,42 @@ fun MovieDetailsScreen(
                         enabled = !isFindingStream,
                         onClick = {
                             val useVlc = selectedPlayerEngine == "VLC"
-                            if (currentMovie.streamUrl.isBlank()) {
-                                isFindingStream = true
+                            val playTarget: (String) -> Unit = { targetUrl ->
+                                if (onNavigateToPlayer != null) {
+                                    val route = NavDestinations.buildPlayerRoute(targetUrl)
+                                    onNavigateToPlayer(route)
+                                } else {
+                                    onPlay(targetUrl, currentMovie.name, ContentType.MOVIE, useVlc)
+                                }
                             }
-                            if (onNavigateToPlayer != null) {
-                                val route = NavDestinations.buildPlayerRoute(currentMovie.streamUrl)
-                                onNavigateToPlayer(route)
+
+                            if (availableStreams.size > 1) {
+                                showStreamOptionsSheet = true
+                            } else if (availableStreams.size == 1) {
+                                playTarget(availableStreams.first().streamUrl)
+                            } else if (currentMovie.streamUrl.isNotBlank()) {
+                                playTarget(currentMovie.streamUrl)
                             } else {
-                                onPlay(currentMovie.streamUrl, currentMovie.name, ContentType.MOVIE, useVlc)
+                                isFindingStream = true
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                    val res = com.foxstream.app.util.StreamResolver.resolveStream(
+                                        context = context,
+                                        title = currentMovie.name,
+                                        year = currentMovie.year,
+                                        type = "movie"
+                                    )
+                                    isFindingStream = false
+                                    if (res is com.foxstream.app.util.StreamResolutionState.Available) {
+                                        availableStreams = res.allStreams
+                                        if (res.allStreams.size > 1) {
+                                            showStreamOptionsSheet = true
+                                        } else {
+                                            playTarget(res.stream.streamUrl)
+                                        }
+                                    } else {
+                                        android.widget.Toast.makeText(context, "Nenhum stream disponível para este título.", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
@@ -271,21 +330,25 @@ fun MovieDetailsScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Localizando mídia na lista...",
+                                text = "Localizando transmissão...",
                                 color = Color.Black,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.5.sp
                             )
                         } else {
                             Icon(
-                                imageVector = Icons.Default.PlayArrow,
+                                imageVector = if (availableStreams.size > 1) Icons.Default.FormatListBulleted else Icons.Default.PlayArrow,
                                 contentDescription = null,
                                 tint = Color.Black,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (hasHistory) "Continuar Assistindo ($resumePositionText)" else "Assistir Agora (LibVLC)",
+                                text = when {
+                                    availableStreams.size > 1 -> "Opções de Transmissão (${availableStreams.size} fontes)"
+                                    hasHistory -> "Continuar Assistindo ($resumePositionText)"
+                                    else -> "Assistir Agora ($selectedPlayerEngine)"
+                                },
                                 color = Color.Black,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp,
@@ -848,6 +911,160 @@ fun MovieDetailsScreen(
                                 color = Color.Gray,
                                 fontSize = 12.5.sp
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showStreamOptionsSheet && availableStreams.isNotEmpty()) {
+            MovieStreamOptionsSheet(
+                movie = currentMovie,
+                streams = availableStreams,
+                selectedPlayerEngine = selectedPlayerEngine,
+                onDismiss = { showStreamOptionsSheet = false },
+                onSelectStream = { streamUrl ->
+                    showStreamOptionsSheet = false
+                    val useVlc = selectedPlayerEngine == "VLC"
+                    if (onNavigateToPlayer != null) {
+                        val route = NavDestinations.buildPlayerRoute(streamUrl)
+                        onNavigateToPlayer(route)
+                    } else {
+                        onPlay(streamUrl, currentMovie.name, ContentType.MOVIE, useVlc)
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun MovieStreamOptionsSheet(
+    movie: MovieItem,
+    streams: List<com.foxstream.app.util.StreamSource>,
+    selectedPlayerEngine: String,
+    onDismiss: () -> Unit,
+    onSelectStream: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.75f)
+                .clickable(enabled = false) {},
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            color = Color(0xFF141722),
+            border = BorderStroke(1.dp, Color(0x22FFFFFF))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Fechar",
+                            tint = Color.White
+                        )
+                    }
+
+                    Text(
+                        text = "Fontes Disponíveis (${streams.size})",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+
+                    Spacer(modifier = Modifier.size(48.dp))
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "${movie.name} • Player: $selectedPlayerEngine",
+                    color = OrangePrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(streams) { stream ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onSelectStream(stream.streamUrl) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E2230),
+                            border = BorderStroke(1.dp, Color(0x33FFFFFF))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = OrangePrimary.copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, OrangePrimary)
+                                ) {
+                                    Text(
+                                        text = stream.quality ?: "HD",
+                                        color = OrangePrimary,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stream.name ?: "Stream",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.5.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = stream.details ?: stream.title,
+                                        color = Color(0xFFAAAAAA),
+                                        fontSize = 11.5.sp,
+                                        maxLines = 4,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Reproduzir",
+                                    tint = OrangePrimary,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
                         }
                     }
                 }

@@ -4503,9 +4503,10 @@ fun EpisodeCard(
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color(0xFF0F1118))
             ) {
-                if (!series.posterUrl.isNullOrBlank()) {
+                val epThumbnail = episode.thumbnail ?: series.backdropUrl ?: series.posterUrl
+                if (!epThumbnail.isNullOrBlank()) {
                     SubcomposeAsyncImage(
-                        model = series.posterUrl,
+                        model = epThumbnail,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
@@ -4860,6 +4861,7 @@ fun SeriesDetailView(
     val listFadeAlpha = remember(series.id) { Animatable(1f) }
     val coroutineScope = rememberCoroutineScope()
     var transitionJob by remember { mutableStateOf<Job?>(null) }
+    var selectedEpisodeForStreams by remember(series.id) { mutableStateOf<EpisodeItem?>(null) }
 
     val safeTargetIndex = if (series.seasons.isNotEmpty()) {
         targetSeasonIndex.coerceIn(0, series.seasons.size - 1)
@@ -4915,7 +4917,7 @@ fun SeriesDetailView(
                     SeriesDetailHeader(
                         series = series,
                         resumeEpisode = resumeEpisode,
-                        onPlayResume = { resumeEpisode?.let { onPlayEpisode(series, it) } },
+                        onPlayResume = { resumeEpisode?.let { selectedEpisodeForStreams = it } },
                         onBack = onBack
                     )
                 }
@@ -5030,7 +5032,7 @@ fun SeriesDetailView(
                                         series = series,
                                         episode = ep,
                                         history = history,
-                                        onClick = { onPlayEpisode(series, ep) },
+                                        onClick = { selectedEpisodeForStreams = ep },
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
@@ -5059,9 +5061,283 @@ fun SeriesDetailView(
                                 series = series,
                                 episode = ep,
                                 history = history,
-                                onClick = { onPlayEpisode(series, ep) },
+                                onClick = { selectedEpisodeForStreams = ep },
                                 modifier = Modifier.fillMaxWidth()
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Two-Tier Navigation: Episode Details & Stream Resolver Modal
+        if (selectedEpisodeForStreams != null) {
+            EpisodeDetailsSheet(
+                series = series,
+                episode = selectedEpisodeForStreams!!,
+                onDismiss = { selectedEpisodeForStreams = null },
+                onPlayStream = { streamUrl, title ->
+                    val epToPlay = selectedEpisodeForStreams!!.copy(streamUrl = streamUrl, title = title)
+                    onPlayEpisode(series, epToPlay)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun EpisodeDetailsSheet(
+    series: SeriesItem,
+    episode: EpisodeItem,
+    onDismiss: () -> Unit,
+    onPlayStream: (streamUrl: String, title: String) -> Unit
+) {
+    val context = LocalContext.current
+    var isResolving by remember { mutableStateOf(true) }
+    var streamList by remember { mutableStateOf<List<com.foxstream.app.util.StreamSource>>(emptyList()) }
+
+    LaunchedEffect(episode.id) {
+        isResolving = true
+        val direct = if (episode.streamUrl.isNotBlank()) {
+            listOf(
+                com.foxstream.app.util.StreamSource(
+                    id = episode.id,
+                    title = episode.title,
+                    type = "series",
+                    streamUrl = episode.streamUrl,
+                    quality = "HD",
+                    name = "Stream Direto"
+                )
+            )
+        } else emptyList()
+
+        val result = com.foxstream.app.util.StreamResolver.resolveStream(
+            context = context,
+            tmdbId = series.id,
+            title = series.name,
+            year = series.year,
+            type = "series",
+            seasonNum = episode.seasonNum,
+            episodeNum = episode.episodeNum
+        )
+
+        val resolved = when (result) {
+            is com.foxstream.app.util.StreamResolutionState.Available -> result.allStreams
+            else -> emptyList()
+        }
+
+        streamList = (direct + resolved).distinctBy { it.streamUrl }
+        isResolving = false
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+                .clickable(enabled = false) {},
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            color = Color(0xFF141722),
+            border = BorderStroke(1.dp, Color(0x22FFFFFF))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header with back/close button & title
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Fechar",
+                            tint = Color.White
+                        )
+                    }
+
+                    Text(
+                        text = "Opções de Transmissão",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+
+                    Spacer(modifier = Modifier.size(48.dp))
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Episode Metadata Banner
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0F1118), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val thumbUrl = episode.thumbnail ?: series.backdropUrl ?: series.posterUrl
+                    if (!thumbUrl.isNullOrBlank()) {
+                        SubcomposeAsyncImage(
+                            model = thumbUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .width(100.dp)
+                                .height(60.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "T${episode.seasonNum}:E${episode.episodeNum} • ${episode.title}",
+                            color = OrangePrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (!episode.duration.isNullOrBlank()) {
+                            Text(
+                                text = "Duração: ${episode.duration}",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
+                        if (!episode.overview.isNullOrBlank()) {
+                            Text(
+                                text = episode.overview,
+                                color = Color(0xFFCCCCCC),
+                                fontSize = 12.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Selecione uma fonte (${streamList.size} disponíveis)",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (isResolving) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = OrangePrimary)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Buscando streams no Stremio e IPTV...",
+                                color = Color.Gray,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                } else if (streamList.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Nenhum stream disponível para este episódio.",
+                            color = Color.Gray,
+                            fontSize = 14.sp
+                        )
+                    }
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(streamList) { stream ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        onPlayStream(
+                                            stream.streamUrl,
+                                            "${series.name} - T${episode.seasonNum}:E${episode.episodeNum} ${episode.title}"
+                                        )
+                                        onDismiss()
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF1E2230),
+                                border = BorderStroke(1.dp, Color(0x33FFFFFF))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = OrangePrimary.copy(alpha = 0.2f),
+                                        border = BorderStroke(1.dp, OrangePrimary)
+                                    ) {
+                                        Text(
+                                            text = stream.quality ?: "HD",
+                                            color = OrangePrimary,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = stream.name ?: "Stream",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = stream.details ?: stream.title,
+                                            color = Color(0xFFAAAAAA),
+                                            fontSize = 11.5.sp,
+                                            maxLines = 4,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Reproduzir",
+                                        tint = OrangePrimary,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
