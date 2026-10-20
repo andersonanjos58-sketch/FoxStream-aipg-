@@ -133,10 +133,10 @@ object StreamResolver {
 
                 // Smart match calculation
                 val res = SmartMatch.evaluate(
-                    localRawTitle = s.title,
+                    localRawName = s.title,
                     localCategory = s.type,
                     localRawYear = s.year?.toString(),
-                    tmdbTitle = title,
+                    tmdbTitle = title ?: "",
                     tmdbOriginalTitle = null,
                     tmdbYear = year
                 )
