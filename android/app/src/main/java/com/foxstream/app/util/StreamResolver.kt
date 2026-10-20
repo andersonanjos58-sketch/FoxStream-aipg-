@@ -111,7 +111,7 @@ object StreamResolver {
             val sharedPrefs = context.getSharedPreferences("foxstream_prefs", Context.MODE_PRIVATE)
             val configuredAddon = sharedPrefs.getString("foxstream_active_addon_url", null)
             val addonUrl = if (!configuredAddon.isNullOrBlank()) configuredAddon.trim() else DEFAULT_ADDON_URL
-            val addonBase = addonUrl.replace(Regex("""/manifest\.json$""", RegexOption.IGNORE_CASE)).trimEnd('/')
+            val addonBase = addonUrl.replace(Regex("""/manifest\.json$""", RegexOption.IGNORE_CASE), "").trimEnd('/')
 
             val isTv = type.equals("series", ignoreCase = true) || type.equals("tv", ignoreCase = true)
             var imdbId: String? = null

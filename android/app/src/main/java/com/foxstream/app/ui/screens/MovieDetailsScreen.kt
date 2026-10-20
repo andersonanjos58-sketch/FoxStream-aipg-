@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -294,7 +295,7 @@ fun MovieDetailsScreen(
                                 playTarget(currentMovie.streamUrl)
                             } else {
                                 isFindingStream = true
-                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                coroutineScope.launch {
                                     val res = com.foxstream.app.util.StreamResolver.resolveStream(
                                         context = context,
                                         title = currentMovie.name,
