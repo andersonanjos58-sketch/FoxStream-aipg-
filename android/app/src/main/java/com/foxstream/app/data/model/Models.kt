@@ -6,7 +6,8 @@ import java.util.UUID
 
 enum class PlaylistType {
     M3U,
-    XTREAM
+    XTREAM,
+    ADDON_JSON
 }
 
 enum class ContentType {

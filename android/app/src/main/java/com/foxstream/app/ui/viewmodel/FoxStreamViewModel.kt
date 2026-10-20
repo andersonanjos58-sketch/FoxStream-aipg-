@@ -142,6 +142,13 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             isLoading = true
             errorMessage = null
             try {
+                val selectedPl = withContext(Dispatchers.IO) {
+                    db.playlistDao().getPlaylistById(playlistId)
+                }
+                if (selectedPl?.type == PlaylistType.ADDON_JSON && !selectedPl.url.isNullOrBlank()) {
+                    StreamResolver.saveActiveAddonUrl(getApplication(), selectedPl.url)
+                }
+
                 val pChannels = withContext(Dispatchers.IO) {
                     db.liveChannelDao().getChannelsForPlaylist(playlistId)
                 }
@@ -778,6 +785,44 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun addAddonJsonPlaylist(name: String, addonUrl: String, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                val targetUrl = addonUrl.trim()
+                val finalName = if (name.isNotBlank()) name.trim() else "Stremio Add-on"
+                val playlistId = "addon_${System.currentTimeMillis()}"
+
+                // Save configured addon url to persistent prefs
+                StreamResolver.saveActiveAddonUrl(getApplication(), targetUrl)
+
+                withContext(Dispatchers.IO) {
+                    val playlist = Playlist(
+                        id = playlistId,
+                        name = finalName,
+                        type = PlaylistType.ADDON_JSON,
+                        url = targetUrl,
+                        lastUpdated = System.currentTimeMillis(),
+                        liveCount = 0,
+                        movieCount = 0,
+                        seriesCount = 0
+                    )
+                    db.playlistDao().insertPlaylist(playlist)
+                }
+
+                refreshPlaylists()
+                selectPlaylist(playlistId)
+                onComplete()
+            } catch (t: Throwable) {
+                android.util.Log.e("FoxStreamViewModel", "Error adding Add-on JSON", t)
+                errorMessage = "Erro ao adicionar Add-on JSON: ${t.localizedMessage ?: t.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
     fun deletePlaylist(playlistId: String) {
         viewModelScope.launch {
             isLoading = true
@@ -1072,7 +1117,16 @@ class FoxStreamViewModel(application: Application) : AndroidViewModel(applicatio
             isLoading = true
             errorMessage = null
             try {
-                if (playlist.type == PlaylistType.M3U) {
+                if (playlist.type == PlaylistType.ADDON_JSON) {
+                    val targetUrl = playlist.url ?: StreamResolver.getActiveAddonUrl(getApplication())
+                    StreamResolver.saveActiveAddonUrl(getApplication(), targetUrl)
+                    withContext(Dispatchers.IO) {
+                        val updated = playlist.copy(
+                            lastUpdated = System.currentTimeMillis()
+                        )
+                        db.playlistDao().insertPlaylist(updated)
+                    }
+                } else if (playlist.type == PlaylistType.M3U) {
                     val m3uUrl = playlist.url ?: throw Exception("URL vazia para esta playlist")
                     val parseResult = withContext(Dispatchers.IO) {
                         val conn = URL(m3uUrl).openConnection().apply {

@@ -5993,7 +5993,8 @@ fun AddPlaylistDialog(
     isLoading: Boolean = false,
     onDismiss: () -> Unit,
     onAddM3U: (name: String, url: String) -> Unit,
-    onAddXtream: (name: String, serverUrl: String, user: String, pass: String) -> Unit
+    onAddXtream: (name: String, serverUrl: String, user: String, pass: String) -> Unit,
+    onAddAddonJson: (name: String, url: String) -> Unit
 ) {
     var selectedMethod by remember { mutableStateOf("M3U / M3U8") }
     var playlistName by remember { mutableStateOf("") }
@@ -6001,8 +6002,9 @@ fun AddPlaylistDialog(
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var m3uUrl by remember { mutableStateOf("") }
+    var addonUrl by remember { mutableStateOf("") }
 
-    val methods = listOf("M3U / M3U8", "XTREAM CODES / API")
+    val methods = listOf("M3U / M3U8", "XTREAM CODES / API", "ADD-ON JSON")
 
     Dialog(onDismissRequest = { if (!isLoading) onDismiss() }) {
         Surface(
@@ -6013,10 +6015,10 @@ fun AddPlaylistDialog(
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Adicionar Lista", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White)
 
-                // Method selector: [M3U / M3U8]   [XTREAM CODES / API]
+                // Method selector: [M3U / M3U8]   [XTREAM CODES / API]   [ADD-ON JSON]
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     methods.forEach { method ->
                         val isSelected = selectedMethod == method
@@ -6033,7 +6035,7 @@ fun AddPlaylistDialog(
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                                 Text(
                                     text = method,
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) Color.White else Color(0xFFB0B5C6),
                                     maxLines = 1
@@ -6046,7 +6048,7 @@ fun AddPlaylistDialog(
                 OutlinedTextField(
                     value = playlistName,
                     onValueChange = { playlistName = it },
-                    label = { Text("Nome da Lista") },
+                    label = { Text("Nome da Lista / Add-on") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading
                 )
@@ -6056,6 +6058,15 @@ fun AddPlaylistDialog(
                         value = m3uUrl,
                         onValueChange = { m3uUrl = it },
                         label = { Text("URL M3U / M3U8") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading
+                    )
+                } else if (selectedMethod == "ADD-ON JSON") {
+                    OutlinedTextField(
+                        value = addonUrl,
+                        onValueChange = { addonUrl = it },
+                        label = { Text("URL Add-on JSON / Manifesto Stremio") },
+                        placeholder = { Text("https://exemplo.com/manifest.json") },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isLoading
                     )
@@ -6089,11 +6100,10 @@ fun AddPlaylistDialog(
                     }
                     Button(
                         onClick = {
-                            val isM3u = selectedMethod == "M3U / M3U8"
-                            if (isM3u) {
-                                onAddM3U(playlistName, m3uUrl)
-                            } else {
-                                onAddXtream(playlistName, serverUrl, username, password)
+                            when (selectedMethod) {
+                                "M3U / M3U8" -> onAddM3U(playlistName, m3uUrl)
+                                "ADD-ON JSON" -> onAddAddonJson(playlistName, addonUrl)
+                                else -> onAddXtream(playlistName, serverUrl, username, password)
                             }
                         },
                         enabled = !isLoading && playlistName.isNotBlank(),

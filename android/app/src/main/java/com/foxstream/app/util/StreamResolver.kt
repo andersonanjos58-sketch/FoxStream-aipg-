@@ -306,4 +306,14 @@ object StreamResolver {
 
         StreamResolutionState.Unavailable
     }
+
+    fun getActiveAddonUrl(context: Context): String {
+        val sharedPrefs = context.getSharedPreferences("foxstream_prefs", Context.MODE_PRIVATE)
+        return sharedPrefs.getString("foxstream_active_addon_url", DEFAULT_ADDON_URL) ?: DEFAULT_ADDON_URL
+    }
+
+    fun saveActiveAddonUrl(context: Context, url: String) {
+        val sharedPrefs = context.getSharedPreferences("foxstream_prefs", Context.MODE_PRIVATE)
+        sharedPrefs.edit().putString("foxstream_active_addon_url", url.trim()).apply()
+    }
 }

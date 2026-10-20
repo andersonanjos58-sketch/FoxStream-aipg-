@@ -579,6 +579,11 @@ fun FoxStreamApp(
                             viewModel.addXtreamPlaylist(name, serverUrl, user, pass) {
                                 showAddPlaylistDialog = false
                             }
+                        },
+                        onAddAddonJson = { name, url ->
+                            viewModel.addAddonJsonPlaylist(name, url) {
+                                showAddPlaylistDialog = false
+                            }
                         }
                     )
                 }
