@@ -37,6 +37,7 @@ import kotlinx.coroutines.withContext
 
 enum class AppNavTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     HOME("Início", Icons.Default.Home),
+    CATALOG("Catálogo", Icons.Default.Explore),
     LIVE("TV ao Vivo", Icons.Default.Tv),
     MOVIES("Filmes", Icons.Default.Movie),
     SERIES("Séries", Icons.Default.VideoLibrary),
@@ -450,6 +451,19 @@ fun FoxStreamApp(
                             },
                             onRemoveHistory = { item ->
                                 viewModel.removeHistoryItem(item)
+                            }
+                        )
+                        AppNavTab.CATALOG -> CatalogScreen(
+                            onOpenMovie = { movie ->
+                                val route = NavDestinations.buildMovieDetailsRoute(movie.id)
+                                navigateToRoute(route)
+                            },
+                            onOpenSeries = { series ->
+                                selectedSeriesForDetails = series
+                                currentTab = AppNavTab.SERIES
+                            },
+                            onPlayDirectStream = { url, title ->
+                                onPlayStream(url, title, ContentType.MOVIE)
                             }
                         )
                         AppNavTab.LIVE -> LiveTvScreen(
