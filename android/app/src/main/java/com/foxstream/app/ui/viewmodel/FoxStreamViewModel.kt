@@ -11,6 +11,7 @@ import com.foxstream.app.data.api.XtreamApiClient
 import com.foxstream.app.data.api.OmdbApiClient
 import com.foxstream.app.data.api.TmdbApiClient
 import com.foxstream.app.util.SearchUtils
+import com.foxstream.app.util.StreamResolver
 import com.foxstream.app.data.local.AppDatabase
 import com.foxstream.app.data.local.HomeCacheManager
 import com.foxstream.app.util.SmartMatch
